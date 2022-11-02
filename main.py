@@ -6,7 +6,7 @@ import export_to_gmsh
 
 class Param:
     def __init__(self, nx, ny, b, d, c, scale_u, scale_l,
-                 z_te, r_le_u, r_le_l, beta_u, beta_l,
+                 z_te, r_le_u, r_le_l, beta_u, beta_l, coeffs_u, coeffs_l,
                  x_le, z_n, delta_alpha_t,
                  n1, n2, nc1, nc2, ny1, ny2, order):
         self.Nx = nx
@@ -23,6 +23,8 @@ class Param:
         self.R_LE_Lower_ = r_le_l  # Rayon de courbure de la surface inférieure
         self.BETA_Upper_ = beta_u  # Angle de la surface supérieure au bord de fuite
         self.BETA_Lower_ = beta_l  # Angle de la surface inférieure au bord de fuite
+        self.COEFFICIENTS_Upper = coeffs_u    # Coefficients du polynôme de Bernstein de la surface supérieure
+        self.COEFFICIENTS_Lower = coeffs_l  # Coefficients du polynôme de Bernstein de la surface supérieure
 
         self.X_LE_ = x_le  # Translation en x de l'aile
         self.Z_N_ = z_n  # Translation en z de l'aile
@@ -218,8 +220,12 @@ def build_airfoil(param):
         zeta_t = z_te[k] / c[k]
         zeta_n = z_n[k] / c[k]
 
-        a_upper = bernstein_coefficients(z_te[k] / 2, r_le_upper[k], beta_upper[k], c[k], order, scale_upper[k])
-        a_lower = bernstein_coefficients(z_te[k] / 2, r_le_lower[k], beta_lower[k], c[k], order, scale_lower[k])
+        a_upper = param.COEFFICIENTS_Upper
+        a_lower = param.COEFFICIENTS_Lower
+        if len(a_upper) == 0:
+            a_upper = bernstein_coefficients(z_te[k] / 2, r_le_upper[k], beta_upper[k], c[k], order, scale_upper[k])
+        if len(a_lower) == 0:
+            a_lower = bernstein_coefficients(z_te[k] / 2, r_le_lower[k], beta_lower[k], c[k], order, scale_lower[k])
 
         su_partial = vector_multiply(c[k],
                                      airfoil_profile(eps, zeta_n, zeta_t / 2, delta_alpha_t[k], a_upper, [n1[k], n2[k]],
@@ -248,6 +254,7 @@ WING_RIGHT = Param(nx=25, ny=10, b=10, d=.5,
                    r_le_l=[0.025, 0.025, 0.005],
                    beta_u=[0.4, 0.1],
                    beta_l=[-0.2, -0.05],
+                   coeffs_u=[], coeffs_l=[],
                    x_le=[0, 2],
                    z_n=[0.05, 0.1, 0.4],
                    delta_alpha_t=[0.05, 0.2],
@@ -264,6 +271,7 @@ WING_LEFT = Param(nx=25, ny=10, b=-10, d=-.5,
                   r_le_l=[0.025, 0.025, 0.005],
                   beta_u=[0.4, 0.1],
                   beta_l=[-0.2, -0.05],
+                  coeffs_u=[], coeffs_l=[],
                   x_le=[0, 2],
                   z_n=[0.05, 0.1, 0.4],
                   delta_alpha_t=[0.05, 0.2],
@@ -271,19 +279,21 @@ WING_LEFT = Param(nx=25, ny=10, b=-10, d=-.5,
                   n2=[1.0],
                   nc1=0.0, nc2=0.5, ny1=0.0, ny2=0.0, order=2)
 
-BODY = Param(nx=50, ny=50, b=1.5, d=-.75,
+BODY = Param(nx=100, ny=50, b=1.5, d=-.75,
              c=[6],
-             scale_u=[.25],
+             scale_u=[0.25],
              scale_l=[.15],
              z_te=[0],
              r_le_u=[0.5],
              r_le_l=[0.25],
              beta_u=[.5],
              beta_l=[.2],
+             coeffs_u=[0.30, 0.80, 0.30, 0.30, 0.40, 0.40, 0.40, 0.40, 0.60],
+             coeffs_l=[0.20, 0.30, 0.20, 0.20, 0.20, 0.20, 0.20, 0.10, 0.10],
              x_le=[-1],
              z_n=[0.1],
              delta_alpha_t=[0],
-             n1=[0.35],
+             n1=[0.50],
              n2=[0.75],
              nc1=0.5, nc2=0.5, ny1=0.25, ny2=0.25, order=4)
 
@@ -296,6 +306,7 @@ ENGINE_RIGHT = Param(nx=20, ny=20, b=1, d=3.5,
                      r_le_l=[0.5],
                      beta_u=[.5],
                      beta_l=[.2],
+                     coeffs_u=[], coeffs_l=[],
                      x_le=[.75],
                      z_n=[-0.2],
                      delta_alpha_t=[0],
@@ -312,6 +323,7 @@ ENGINE_LEFT = Param(nx=20, ny=20, b=1, d=-4.5,
                     r_le_l=[0.5],
                     beta_u=[.5],
                     beta_l=[.2],
+                    coeffs_u=[], coeffs_l=[],
                     x_le=[.75],
                     z_n=[-0.2],
                     delta_alpha_t=[0],
@@ -319,19 +331,38 @@ ENGINE_LEFT = Param(nx=20, ny=20, b=1, d=-4.5,
                     n2=[0.01],
                     nc1=0.5, nc2=0.5, ny1=0.0, ny2=0.0, order=0)
 
+TAIL = Param(nx=50, ny=50, b=1.5, d=-.75,
+             c=[6],
+             scale_u=[.25],
+             scale_l=[.15],
+             z_te=[0],
+             r_le_u=[0.5],
+             r_le_l=[0.25],
+             beta_u=[.5],
+             beta_l=[.2],
+             coeffs_u=[], coeffs_l=[],
+             x_le=[-1],
+             z_n=[0.1],
+             delta_alpha_t=[0],
+             n1=[0.35],
+             n2=[0.75],
+             nc1=0.5, nc2=0.5, ny1=0.25, ny2=0.25, order=4)
+
+
 X1, Y1, Su1, Sl1 = build_airfoil(WING_RIGHT)
 X2, Y2, Su2, Sl2 = build_airfoil(WING_LEFT)
 X3, Y3, Su3, Sl3 = build_airfoil(BODY)
 X4, Y4, Su4, Sl4 = build_airfoil(ENGINE_RIGHT)
 X5, Y5, Su5, Sl5 = build_airfoil(ENGINE_LEFT)
+X6, Y6, Su6, Sl6 = build_airfoil(TAIL)
 
 X_slices = []
 Y_slices = []
 Su_slices = []
 Sl_slices = []
 
-y_slice = 0.345
-# y_slice = 2.00
+# y_slice = 0.345
+y_slice = 2.00
 # y_slice = -1.0
 X1_slice, Y1_slice, Su1_slice, Sl1_slice = export_to_gmsh.slice_solid(y_slice, X1, Y1, Su1, Sl1)
 X_slices, Y_slices, Su_slices, Sl_slices = export_to_gmsh.group_airfoils(X1_slice, Y1_slice,
@@ -369,7 +400,7 @@ plt.plot(X5_slice, Su5_slice)
 plt.plot(X5_slice, Sl5_slice)
 
 filename = 'airfoil.geo'
-export_to_gmsh.gmsh_export(filename, X_slices, Y_slices, Su_slices, Sl_slices, [0.01, 1])
+export_to_gmsh.gmsh_export(filename, X_slices, Y_slices, Su_slices, Sl_slices, [0.003, 3])
 
 fig = plt.figure()
 ax = plt.axes(projection='3d')

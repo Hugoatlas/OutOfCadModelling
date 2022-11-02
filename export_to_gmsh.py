@@ -166,7 +166,11 @@ def print_geo_file(filename, profiles_x, profiles_y, profiles_z, hs,
 
     nb_profiles = len(profiles_x)
     current_index = 0
-    loops_index = 1
+    curve_loops_index = 1
+    plane_surface_index = 1
+    physical_curve_index = 1
+    physical_surface_name = '"internal"'
+
     h1 = hs[0] * cord
     h2 = hs[1] * cord
 
@@ -201,19 +205,19 @@ def print_geo_file(filename, profiles_x, profiles_y, profiles_z, hs,
             f.write('\n')
 
             # Write Curve Loop
-            string = '//+\nCurve Loop(' + str(loops_index) + ') = {' + str(1 + current_index)
+            string = '//+\nCurve Loop(' + str(curve_loops_index) + ') = {' + str(1 + current_index)
             for j in range(1 + current_index, current_index + nb_points):
                 string += ', ' + str(j + 1)
             string += '};\n'
             f.write(string)
-            curve_IDs.append(loops_index)
-            loops_index += 1
+            curve_IDs.append(curve_loops_index)
+            curve_loops_index += 1
 
             # Write Plane Surfaces
-            string = '//+\nPlane Surface(' + str(loops_index) + ') = {' + str(loops_index - 1) + '};\n'
+            string = '//+\nPlane Surface(' + str(plane_surface_index) + ') = {' + str(curve_loops_index - 1) + '};\n'
             f.write(string)
-            surface_IDs.append(loops_index)
-            loops_index += 1
+            surface_IDs.append(plane_surface_index)
+            plane_surface_index += 1
 
             # # Write physical curves
             # string = '//+\nPhysical Curve(' + str(loops_index) + ') = {' + str(1 + current_index)
@@ -249,40 +253,63 @@ def print_geo_file(filename, profiles_x, profiles_y, profiles_z, hs,
     f.write(string)
 
     # Write circle curve loop
-    string = '//+\nCurve Loop(' + str(loops_index) + ') = {' + str(index + 1) + ', ' + str(
+    string = '//+\nCurve Loop(' + str(curve_loops_index) + ') = {' + str(index + 1) + ', ' + str(
         index) + '};\n'
     f.write(string)
-    domain_curve_ID = loops_index
-    loops_index += 1
+    domain_curve_ID = curve_loops_index
+    curve_loops_index += 1
 
     # Write Plane Surfaces of circle
-    string = '//+\nPlane Surface(' + str(loops_index) + ') = {' + str(domain_curve_ID) + '};\n'
+    string = '//+\nPlane Surface(' + str(plane_surface_index) + ') = {' + str(domain_curve_ID) + '};\n'
     f.write(string)
-    domain_surface_ID = loops_index
-    loops_index += 1
+    domain_surface_ID = plane_surface_index
+    circle_domain_ID = plane_surface_index
+    plane_surface_index += 1
 
-    # # Write physical curve of circle
-    # string = '//+\nPhysical Curve(' + str(loops_index) + ') = {' + str(index + 1) + ', ' + str(
-    #     index) + '};\n'
-    # f.write(string)
-    # loops_index += 1
+    # Write physical curve of circle
+    string = '//+\nPhysical Curve(' + str(physical_curve_index) + ') = {' + str(index + 1) + ', ' + str(
+        index) + '};\n'
+    f.write(string)
+    physical_curve_index += 1
+
+    # Fuse airfoils with boolean operations
+    nb_surfaces = len(surface_IDs)
+    if nb_surfaces > 1:
+        string = 'BooleanUnion(' + str(
+            plane_surface_index) + ') = { Surface{' + str(surface_IDs[0]) + '}; } { Surface{' + str(surface_IDs[1])
+        for i in range(1, nb_surfaces - 1):
+            ID = surface_IDs[i]
+            string += ', ' + str(int(ID))
+        string += '}; };\n'
+        f.write(string)
+        plane_surface_index += 1
+
+    # Write physical curve domain of airfoils
+    string = 'Physical Curve(' + str(physical_curve_index) + ') = { Boundary { Surface{' + \
+             str(plane_surface_index - 1) + '};} };\n'
+    f.write(string)
+    physical_curve_index += 1
 
     # Remove all airfoils from domain
     nb_surfaces = len(surface_IDs)
     if nb_surfaces != 0:
-        string = '//+\nBooleanDifference(' + str(loops_index) + ') = { Surface{' + str(
-            domain_surface_ID) + '}; Delete;}{ Surface{' + str(surface_IDs[0])
+        string = 'BooleanDifference(' + str(plane_surface_index) + ') = { Surface{' + str(
+            domain_surface_ID) + '};}{ Surface{' + str(surface_IDs[0])
         for i in range(1, nb_surfaces):
             ID = surface_IDs[i]
             string += ', ' + str(int(ID))
         string += '}; Delete;};\n'
         f.write(string)
-        domain_surface_ID = loops_index
-        loops_index += 1
+        domain_surface_ID = plane_surface_index
+        plane_surface_index += 1
 
     # Write physical surface
-    string = '//+\nPhysical Surface(' + str(loops_index) + ') = {' + str(domain_surface_ID) + '};\n'
+    string = 'Physical Surface(' + str(physical_surface_name) + ') = {' + str(domain_surface_ID) + '};\n'
     f.write(string)
-    loops_index += 1
+
+    # # Remove redundant circle domain
+    # f.write('\n//+\nRecursive Delete {\n')
+    # f.write('    Surface {' + str(circle_domain_ID) + '};\n')
+    # f.write('}\n')
 
     f.close()
