@@ -1,251 +1,13 @@
-import math
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 import export_to_gmsh
+import vlm_mesh as vlm
+import cst_geometry as geo
+import export_to_dat as exp
+from cst_geometry import Param
 
-
-class Param:
-    def __init__(self, nx, ny, b, d, c, scale_u, scale_l,
-                 z_te, r_le_u, r_le_l, beta_u, beta_l, coeffs_u, coeffs_l,
-                 x_le, z_n, delta_alpha_t,
-                 n1, n2, nc1, nc2, ny1, ny2, order):
-        self.Nx = nx
-        self.Ny = ny
-
-        self.B = b  # Largeur totale des deux ailes combinées
-        self.D = d  # Diamètre du fuselage
-        self.C_ = c  # Largeur locale de l'aile
-        self.SCALE_Upper_ = scale_u  # Scale général du profile supérieur
-        self.SCALE_Lower_ = scale_l  # Scale général du profile inférieur
-
-        self.Z_TE_ = z_te  # Espacement au bord de fuite
-        self.R_LE_Upper_ = r_le_u  # Rayon de courbure de la surface supérieure
-        self.R_LE_Lower_ = r_le_l  # Rayon de courbure de la surface inférieure
-        self.BETA_Upper_ = beta_u  # Angle de la surface supérieure au bord de fuite
-        self.BETA_Lower_ = beta_l  # Angle de la surface inférieure au bord de fuite
-        self.COEFFICIENTS_Upper = coeffs_u    # Coefficients du polynôme de Bernstein de la surface supérieure
-        self.COEFFICIENTS_Lower = coeffs_l  # Coefficients du polynôme de Bernstein de la surface supérieure
-
-        self.X_LE_ = x_le  # Translation en x de l'aile
-        self.Z_N_ = z_n  # Translation en z de l'aile
-        self.DELTA_ALPHA_T_ = delta_alpha_t  # Inclinaison de l'aile
-
-        # Class function coefficients
-        self.N1_ = n1  # Coefficient de classe du bord d'attaque
-        self.N2_ = n2  # Coefficient de classe du bord de fuite
-        self.NC1 = nc1  # Coefficient de classe de l'extrémité -Y de l'aile
-        self.NC2 = nc2  # Coefficient de classe de l'extrémité +Y de l'aile
-        self.NY1 = ny1
-        self.NY2 = ny2
-        self.ORDER = order  # Ordre des polynômes de Bernstein
-
-
-def vector_multiply(scalar, vector):
-    y = []
-    for elem in vector:
-        y.append(scalar * elem)
-    return y
-
-
-def vector_divide(scalar, vector):
-    y = []
-    for elem in vector:
-        y.append(elem / scalar)
-    return y
-
-
-def normalize(array):
-    res = np.zeros(np.shape(array))
-    minimum = min(array)
-    for i in range(0, len(array)):
-        res[i] = array[i] + minimum
-    maximum = max(res)
-    if maximum != 0:
-        for i in range(0, len(array)):
-            res[i] = res[i] / maximum
-    return res
-
-
-def distribute_points(start, end, nb):
-    points_init = np.linspace(-1, 1, nb)
-    points_final = []
-    for point in points_init:
-        point_new = point / (1 + math.pow(point, 2))
-        point_new = start + (end - start) * (0.5 + point_new)
-        points_final.append(point_new)
-    return points_final
-
-
-def c_function(eps, ns):
-    y = []
-    for elem in eps:
-        if ns[0] == 0 and elem == 0:
-            y.append(1)
-        elif ns[1] == 0 and elem == 1:
-            y.append(1)
-        else:
-            y.append(math.pow(elem, ns[0]) * math.pow(1 - elem, ns[1]))
-    return y
-
-
-def bernstein_function(eps, coefficients):
-    res = np.zeros(np.shape(eps))
-    order = len(coefficients)
-    for i in range(0, order):
-        bern_i = math.factorial(order - 1) / (math.factorial(i) * math.factorial(order - 1 - i))
-        for j in range(0, len(eps)):
-            res[j] += bern_i * coefficients[i] * math.pow(eps[j], i) * math.pow(1 - eps[j], order - 1 - i)
-    return res
-
-
-def bernstein_coefficients(z_te, r_le, beta, c, order, scale):
-    if order == 0:
-        a = [scale]
-    else:
-        a = np.ones([order, 1]) * scale
-        a[0] = (math.sqrt(2 * r_le / c))
-        a[order - 1] = math.tan(beta) + (z_te / c)
-    return a
-
-
-# def derivative(x, func):
-#     res = np.zeros(np.shape(x))
-#     for i in range(0, len(x)):
-#         if i == 0:
-#             res[i] = (func[i + 1] - func[i]) / (x[i + 1] - x[i])
-#         elif i == len(x) - 1:
-#             res[i] = (func[i] - func[i - 1]) / (x[i] - x[i - 1])
-#         else:
-#             res[i] = (func[i + 1] - func[i - 1]) / (x[i + 1] - x[i - 1])
-#     return res
-#
-#
-# def find_roots(x, func):
-#     f_current = func[0]
-#     x_current = x[0]
-#     roots = []
-#     for i in range(0, len(func)):
-#         if f_current * func[i] <= 0:
-#             if f_current != func[i]:
-#                 root = x_current + ((x[i] - x_current) / (func[i] - f_current)) * (0 - f_current)
-#                 roots.append(root)
-#         f_current = func[i]
-#         x_current = x[i]
-#     return roots
-#
-#
-# def bernstein_coefficients_optimization(canter, eps, zeta_t, shape_coefficients, class_coefficients):
-#     n = 10
-#     final_shape_coefficients = shape_coefficients.copy
-#     roots = []
-#     for i in range(0, n):
-#         # z = bernstein_function(eps, shape_coefficients)
-#         z = airfoil_profile(eps, zeta_t, shape_coefficients, class_coefficients)
-#         z_dot = derivative(eps, z)
-#         roots = find_roots(eps, z_dot)
-#         new_shape_coefficients = shape_coefficients.copy
-#         if len(roots) > 0:
-#             canter_position = roots[0]
-#             err = canter - canter_position
-#
-#     return roots
-
-
-def airfoil_profile(eps, zeta_n, zeta_t, delta_alpha_t, shape_coefficients, class_coefficients, class_eta):
-    y = []
-    shape_function = bernstein_function(eps, shape_coefficients)
-    class_function = c_function(eps, class_coefficients)
-    for i in range(0, len(eps)):
-        p = zeta_n + (shape_function[i] * class_function[i] * class_eta) + eps[i] * (zeta_t - math.tan(delta_alpha_t))
-        y.append(p)
-    return y
-
-
-def build_airfoil(param):
-    eps = distribute_points(0, 1, param.Nx)
-    eta = distribute_points(0, 1, param.Ny)
-
-    b = param.B
-    d = param.D
-    c = bernstein_function(eta, param.C_)
-    scale_upper = bernstein_function(eta, param.SCALE_Upper_)
-    scale_lower = bernstein_function(eta, param.SCALE_Lower_)
-
-    z_te = bernstein_function(eta, param.Z_TE_)
-    r_le_upper = bernstein_function(eta, param.R_LE_Upper_)
-    r_le_lower = bernstein_function(eta, param.R_LE_Lower_)
-    beta_upper = bernstein_function(eta, param.BETA_Upper_)
-    beta_lower = bernstein_function(eta, param.BETA_Lower_)
-
-    x_le = bernstein_function(eta, param.X_LE_)
-    z_n = bernstein_function(eta, param.Z_N_)
-    delta_alpha_t = bernstein_function(eta, param.DELTA_ALPHA_T_)
-
-    # Class function coefficients
-    n1 = bernstein_function(eta, param.N1_)
-    n2 = bernstein_function(eta, param.N2_)
-    nc1 = param.NC1
-    nc2 = param.NC2
-    ny1 = param.NY1
-    ny2 = param.NY2
-    order = param.ORDER
-
-    # Adjust BETA with DELTA_ALPHA
-    beta_upper = beta_upper + delta_alpha_t
-    beta_lower = beta_lower - delta_alpha_t
-
-    # Adjust C with DELTA_ALPHA
-    c = np.multiply(np.cos(delta_alpha_t), c)
-
-    x = []
-    y = []
-    su = []
-    sl = []
-    class_eta = c_function(eta, [nc1, nc2])
-    class_eta_y = normalize(c_function(eta, [ny1, ny2]))
-
-    for k in range(0, len(eta)):
-
-        x_partial = vector_multiply(c[k] * class_eta_y[k], eps) + np.ones(np.shape(eps)) * (
-                x_le[k] + (c[k] / 2) * (1 - class_eta_y[k]))
-        y_partial = ((eta[k] + d / b) * np.ones(np.shape(eps))) * (b / 2)
-
-        if k == 0:
-            x = [x_partial]
-            y = [y_partial]
-        else:
-            x = np.append(x, [x_partial], axis=0)
-            y = np.append(y, [y_partial], axis=0)
-
-        zeta_t = z_te[k] / c[k]
-        zeta_n = z_n[k] / c[k]
-
-        a_upper = param.COEFFICIENTS_Upper
-        a_lower = param.COEFFICIENTS_Lower
-        if len(a_upper) == 0:
-            a_upper = bernstein_coefficients(z_te[k] / 2, r_le_upper[k], beta_upper[k], c[k], order, scale_upper[k])
-        if len(a_lower) == 0:
-            a_lower = bernstein_coefficients(z_te[k] / 2, r_le_lower[k], beta_lower[k], c[k], order, scale_lower[k])
-
-        su_partial = vector_multiply(c[k],
-                                     airfoil_profile(eps, zeta_n, zeta_t / 2, delta_alpha_t[k], a_upper, [n1[k], n2[k]],
-                                                     class_eta[k]))
-        sl_partial = vector_multiply(-c[k],
-                                     airfoil_profile(eps, -zeta_n, zeta_t / 2, -delta_alpha_t[k], a_lower,
-                                                     [n1[k], n2[k]],
-                                                     class_eta[k]))
-
-        if k == 0:
-            su = [su_partial]
-            sl = [sl_partial]
-        else:
-            su = np.append(su, [su_partial], axis=0)
-            sl = np.append(sl, [sl_partial], axis=0)
-
-    return x, y, su, sl
-
-
-WING_RIGHT = Param(nx=25, ny=10, b=10, d=.5,
+WING_RIGHT = Param(nx=20, ny=50, b=10, d=.5,
                    c=[1.2, 0.7, 0.35, 0.3, 0.25],
                    scale_u=[0.4, 0.1],
                    scale_l=[0.0, 0.0],
@@ -262,24 +24,9 @@ WING_RIGHT = Param(nx=25, ny=10, b=10, d=.5,
                    n2=[1.0],
                    nc1=0.0, nc2=0.5, ny1=0.0, ny2=0.0, order=2)
 
-WING_LEFT = Param(nx=25, ny=10, b=-10, d=-.5,
-                  c=[1.2, 0.7, 0.35, 0.3, 0.25],
-                  scale_u=[0.4, 0.1],
-                  scale_l=[0.0, 0.0],
-                  z_te=[0.002, 0.002, 0.0],
-                  r_le_u=[0.05, 0.05, 0.01],
-                  r_le_l=[0.025, 0.025, 0.005],
-                  beta_u=[0.4, 0.1],
-                  beta_l=[-0.2, -0.05],
-                  coeffs_u=[], coeffs_l=[],
-                  x_le=[0, 2],
-                  z_n=[0.05, 0.1, 0.4],
-                  delta_alpha_t=[0.05, 0.2],
-                  n1=[0.5],
-                  n2=[1.0],
-                  nc1=0.0, nc2=0.5, ny1=0.0, ny2=0.0, order=2)
+WING_LEFT = geo.mirror_body_xz(WING_RIGHT)
 
-BODY = Param(nx=100, ny=50, b=1.5, d=-.75,
+BODY = Param(nx=15, ny=15, b=1.5, d=-.75,
              c=[6],
              scale_u=[0.25],
              scale_l=[.15],
@@ -314,22 +61,7 @@ ENGINE_RIGHT = Param(nx=20, ny=20, b=1, d=3.5,
                      n2=[0.01],
                      nc1=0.5, nc2=0.5, ny1=0.0, ny2=0.0, order=0)
 
-ENGINE_LEFT = Param(nx=20, ny=20, b=1, d=-4.5,
-                    c=[0.5],
-                    scale_u=[1],
-                    scale_l=[1],
-                    z_te=[0],
-                    r_le_u=[0.5],
-                    r_le_l=[0.5],
-                    beta_u=[.5],
-                    beta_l=[.2],
-                    coeffs_u=[], coeffs_l=[],
-                    x_le=[.75],
-                    z_n=[-0.2],
-                    delta_alpha_t=[0],
-                    n1=[0.01],
-                    n2=[0.01],
-                    nc1=0.5, nc2=0.5, ny1=0.0, ny2=0.0, order=0)
+ENGINE_LEFT = geo.mirror_body_xz(ENGINE_RIGHT)
 
 TAIL = Param(nx=50, ny=50, b=1.5, d=-.75,
              c=[6],
@@ -348,59 +80,101 @@ TAIL = Param(nx=50, ny=50, b=1.5, d=-.75,
              n2=[0.75],
              nc1=0.5, nc2=0.5, ny1=0.25, ny2=0.25, order=4)
 
-
-X1, Y1, Su1, Sl1 = build_airfoil(WING_RIGHT)
-X2, Y2, Su2, Sl2 = build_airfoil(WING_LEFT)
-X3, Y3, Su3, Sl3 = build_airfoil(BODY)
-X4, Y4, Su4, Sl4 = build_airfoil(ENGINE_RIGHT)
-X5, Y5, Su5, Sl5 = build_airfoil(ENGINE_LEFT)
-X6, Y6, Su6, Sl6 = build_airfoil(TAIL)
+X1, Y1, Su1, Sl1 = geo.build_body_surfaces(geo.gen_base(WING_RIGHT, "eps"), geo.gen_base(WING_RIGHT, "eta"), WING_RIGHT)
+X2, Y2, Su2, Sl2 = geo.build_body_surfaces(geo.gen_base(WING_LEFT, "eps"), geo.gen_base(WING_LEFT, "eta"), WING_LEFT)
+X3, Y3, Su3, Sl3 = geo.build_body_surfaces(geo.gen_base(BODY, "eps"), geo.gen_base(BODY, "eta"), BODY)
+X4, Y4, Su4, Sl4 = geo.build_body_surfaces(geo.gen_base(ENGINE_RIGHT, "eps"), geo.gen_base(ENGINE_RIGHT, "eta"),
+                                           ENGINE_RIGHT)
+X5, Y5, Su5, Sl5 = geo.build_body_surfaces(geo.gen_base(ENGINE_LEFT, "eps"), geo.gen_base(ENGINE_LEFT, "eta"),
+                                           ENGINE_LEFT)
+X6, Y6, Su6, Sl6 = geo.build_body_surfaces(geo.gen_base(TAIL, "eps"), geo.gen_base(TAIL, "eta"), TAIL)
 
 X_slices = []
 Y_slices = []
 Su_slices = []
 Sl_slices = []
 
-# y_slice = 0.345
-y_slice = 2.00
-# y_slice = -1.0
-X1_slice, Y1_slice, Su1_slice, Sl1_slice = export_to_gmsh.slice_solid(y_slice, X1, Y1, Su1, Sl1)
-X_slices, Y_slices, Su_slices, Sl_slices = export_to_gmsh.group_airfoils(X1_slice, Y1_slice,
-                                                                         Su1_slice, Sl1_slice, X_slices, Y_slices,
-                                                                         Su_slices, Sl_slices)
-
-X2_slice, Y2_slice, Su2_slice, Sl2_slice = export_to_gmsh.slice_solid(y_slice, X2, Y2, Su2, Sl2)
-X_slices, Y_slices, Su_slices, Sl_slices = export_to_gmsh.group_airfoils(X2_slice, Y2_slice,
-                                                                         Su2_slice, Sl2_slice, X_slices, Y_slices,
-                                                                         Su_slices, Sl_slices)
-
-X3_slice, Y3_slice, Su3_slice, Sl3_slice = export_to_gmsh.slice_solid(y_slice, X3, Y3, Su3, Sl3)
-X_slices, Y_slices, Su_slices, Sl_slices = export_to_gmsh.group_airfoils(X3_slice, Y3_slice,
-                                                                         Su3_slice, Sl3_slice, X_slices, Y_slices,
-                                                                         Su_slices, Sl_slices)
-
-X4_slice, Y4_slice, Su4_slice, Sl4_slice = export_to_gmsh.slice_solid(y_slice, X4, Y4, Su4, Sl4)
-X_slices, Y_slices, Su_slices, Sl_slices = export_to_gmsh.group_airfoils(X4_slice, Y4_slice,
-                                                                         Su4_slice, Sl4_slice, X_slices, Y_slices,
-                                                                         Su_slices, Sl_slices)
-
-X5_slice, Y5_slice, Su5_slice, Sl5_slice = export_to_gmsh.slice_solid(y_slice, X5, Y5, Su5, Sl5)
-X_slices, Y_slices, Su_slices, Sl_slices = export_to_gmsh.group_airfoils(X5_slice, Y5_slice,
-                                                                         Su5_slice, Sl5_slice, X_slices, Y_slices,
-                                                                         Su_slices, Sl_slices)
-plt.plot(X1_slice, Su1_slice)
-plt.plot(X1_slice, Sl1_slice)
-plt.plot(X2_slice, Su2_slice)
-plt.plot(X2_slice, Sl2_slice)
-plt.plot(X3_slice, Su3_slice)
-plt.plot(X3_slice, Sl3_slice)
-plt.plot(X4_slice, Su4_slice)
-plt.plot(X4_slice, Sl4_slice)
-plt.plot(X5_slice, Su5_slice)
-plt.plot(X5_slice, Sl5_slice)
-
 filename = 'airfoil.geo'
-export_to_gmsh.gmsh_export(filename, X_slices, Y_slices, Su_slices, Sl_slices, [0.003, 3])
+slice_id = 0
+X_slice = vlm.convert_to_embedded_list(X1[slice_id, :])
+Y_slice = vlm.convert_to_embedded_list(Y1[slice_id, :])
+Su_slice = vlm.convert_to_embedded_list(Su1[slice_id, :])
+Sl_slice = vlm.convert_to_embedded_list(Sl1[slice_id, :])
+X_slices, Y_slices, Su_slices, Sl_slices = export_to_gmsh.group_airfoils(X_slice, Y_slice,
+                                                                         Su_slice, Sl_slice, X_slices, Y_slices,
+                                                                         Su_slices, Sl_slices)
+export_to_gmsh.gmsh_export(filename, [X_slice], [Y_slice], [Su_slice], [Sl_slice], [0.003, 3])
+
+# Generate VLM mesh
+vertex_table_1, elem_table_1, col_table_1, row_table_1, lift_table_1 = vlm.get_vortex_mesh(X1, Y1, Su1, Sl1, 1, True)
+
+# mesh_wing_right = vlm.Mesh()
+# for ni in range(0, np.shape(vertex_table_1)[0]):
+#     mesh_wing_right.append_vertex(vertex_table_1[ni, :])
+#
+# for ni in range(0, np.shape(elem_table_1)[0]):
+#     if lift_table_1[ni] == 1:
+#         element = vlm.Mesh.Vortex(elem_table_1[ni, :], 0, col_table_1[ni], row_table_1[ni])
+#     else:
+#         element = vlm.Mesh.Doublet(elem_table_1[ni, :], 0)
+#     mesh_wing_right.append_element(element)
+#
+# for ni in range(0, len(mesh_wing_right.vertices)):
+#     print(mesh_wing_right.vertices[ni])
+#
+# for ni in range(0, len(mesh_wing_right.elements)):
+#     print(mesh_wing_right.elements[ni].vertices)
+
+# # Get intersection of wings with body
+# intersect_1, vert_1, dest_1, remove_1 = vlm.check_intersections_with_cst_body(elem_table_1, vertex_table_1, BODY,
+#                                                                               precision=50)
+#
+# # Move vertices which need moving
+# vertex_table_1 = vlm.move_vertices(vert_1, dest_1, vertex_table_1)
+#
+# # Remove elements of wings which are fully inside body
+# keep_1 = vlm.get_elements_to_keep(remove_1, elem_table_1)
+# elem_table_1 = vlm.keep_table_lines(keep_1, elem_table_1)
+# col_table_1 = vlm.keep_table_lines(keep_1, col_table_1)
+# row_table_1 = vlm.keep_table_lines(keep_1, row_table_1)
+# lift_table_1 = vlm.keep_table_lines(keep_1, lift_table_1)
+
+# Remove unused vertices
+
+
+# Generate VLM mesh
+vertex_table_2, elem_table_2, col_table_2, row_table_2, lift_table_2 = vlm.get_vortex_mesh(X2, Y2, Su2, Sl2, 1, True)
+
+# # Get intersection of wings with body
+# intersect_2, vert_2, dest_2, remove_2 = vlm.check_intersections_with_cst_body(elem_table_2, vertex_table_2, BODY,
+#                                                                               precision=50)
+#
+# # Move vertices which need moving
+# vertex_table_2 = vlm.move_vertices(vert_2, dest_2, vertex_table_2)
+#
+# # Remove elements of wings which are fully inside body
+# keep_2 = vlm.get_elements_to_keep(remove_2, elem_table_2)
+# elem_table_2 = vlm.keep_table_lines(keep_2, elem_table_2)
+# col_table_2 = vlm.keep_table_lines(keep_2, col_table_2)
+# row_table_2 = vlm.keep_table_lines(keep_2, row_table_2)
+# lift_table_2 = vlm.keep_table_lines(keep_2, lift_table_2)
+
+# Merge wings meshes
+vert, elem, col, row, surface, lift = vlm.merge_meshes(vertex_table_1, elem_table_1, col_table_1, row_table_1, lift_table_1,
+                                                       vertex_table_2, elem_table_2, col_table_2, row_table_2, lift_table_2)
+
+exp.export_vlm_mesh("mesh_maybe.dat", vert, elem, col, row, surface, lift)
+
+# Treat body mesh
+vertex_table_3, elem_table_3, norm_table_3, lift_bodies_3 = vlm.get_surface_mesh_tables(X3, Y3, Su3, Sl3, 0, False,
+                                                                                        False, True)
+
+# ax2 = vlm.visualize_mesh_elements([], vert, elem, None)
+# plt.gca().set_aspect('equal', adjustable='box')
+
+# ax1 = vlm.visualize_mesh_elements([], vertex_table_3, elem_table_3, None)
+# ax1 = vlm.visualize_lines(ax1, dest_1)
+# plt.gca().set_aspect('equal', adjustable='box')
 
 fig = plt.figure()
 ax = plt.axes(projection='3d')
