@@ -225,3 +225,77 @@ def export_vlm_mesh(filename, vertex_table, elem_table, column_table, row_table,
     print("Done writing lifting surfaces to file")
 
     f.close()
+
+
+def export_mesh(filename, mesh):
+    def write_vertices(vertices):
+        vertex_dim = len(vertices)
+        for i in range(0, vertex_dim):
+            string = "NODE " + str(i)
+            for value in vertices[i]:
+                string += " " + str(value)
+            string += "\n"
+            f.write(string)
+
+    def write_vortexes(elements):
+        # Loop through all elements to print vortexes
+        for element in elements:
+            # Check if element is considered a vortex
+            if element.type == "Vortex":
+                string = "VORTEX " + str(element.id)
+                for vertex in element.vertices:
+                    string += " " + str(int(vertex))
+                string += "\n"
+                f.write(string)
+
+    def write_doublets(elements):
+        # Loop through all elements to print doublets
+        for element in elements:
+            # Check if element is considered a doublet
+            if element.type == "Doublet":
+                string = "DOUBLET " + str(element.id)
+                for vertex in element.vertices:
+                    string += " " + str(int(vertex))
+                string += "\n"
+                f.write(string)
+
+    # def write_wing_stations(elements):
+    #     # Get all ids of wing stations
+    #     wing_station_ids = []
+    #     for element in elements:
+    #         pass
+
+    def write_patches(surfaces, elements):
+        # Loop through all surfaces to print surfaces of type Doublet
+        for surface in surfaces:
+            # Check if surface is of type doublet
+            if surface.type == "Doublet":
+                string = "PATCH " + str(surface.id)
+                # Run through all elements and add if it is part of surface
+                for element in elements:
+                    if element.surface == surface.id and element.type == "Doublet":
+                        string += " " + str(element.id)
+                string += "\n"
+                f.write(string)
+
+    f = open(filename, "w")
+
+    write_vertices(mesh.vertices)
+    print("Done writing vertices to file")
+
+    write_doublets(mesh.elements)
+    print("Done writing doublet elements to file")
+
+    write_vortexes(mesh.elements)
+    print("Done writing vortex elements to file")
+
+    # write_wing_stations(column_table, surface_id, lift_table)
+    # print("Done writing wing stations to file")
+
+    # write_lifting_surfaces(f, column_table, surface_id, lift_table)
+    # print("Done writing lifting surfaces to file")
+
+    write_patches(mesh.surfaces, mesh.elements)
+    print("Done writing patches to file")
+
+    f.close()

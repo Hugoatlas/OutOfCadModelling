@@ -1,7 +1,35 @@
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import cst_geometry as geo
+import export_to_gmsh as exp
+
+
+class Box:
+    def __init__(self, box_id, element_ids, mesh_object):
+        self.id = box_id
+        self.min = [0, 0, 0]
+        self.max = [0, 0, 0]
+        self.boxes = []
+        self.elements = element_ids
+        self.mesh = mesh_object
+
+    def get_box_limits(self):
+        for elem_id in self.elements:
+            pass
+
+
+class Group:
+    def __init__(self, group_id, element_ids, mesh_object):
+        self.id = group_id
+        self.contains = element_ids
+        self.mesh = mesh_object
+
+    def sort_elements(self, order, vertices):
+        # order is an integer
+        pass
 
 
 class Mesh:
@@ -24,6 +52,11 @@ class Mesh:
             self.surface = surface
             self.vertices = vertices
 
+    class Wingstation:
+        def __init__(self, wingstation_id, elements):
+            self.id = wingstation_id
+            self.elements = elements
+
     class Surface:
         def __init__(self, surface_id, surface_type, element_count):
             # Two surfaces can have the same ID if they do not have the same type
@@ -41,9 +74,12 @@ class Mesh:
 
     def append_vertex(self, vertex):
         if len(vertex) == 3:
+            new_vertex_id = len(self.vertices)
             self.vertices.append(vertex)
+            return new_vertex_id
         else:
             print("ERROR - Incorrect Vertex Dimensions")
+            return None
 
     def append_element(self, element):
         # Input element has to be either a Vortex object or a Doublet object. Treat both cases individually
@@ -53,16 +89,80 @@ class Mesh:
             self.vortex_count += 1
             # Append Vortex object to mesh elements list
             self.elements.append(element)
-
         elif element.type == "Doublet":
             # Assign a unique doublet_id to element, then update mesh doublet_count
             element.id = self.doublet_count
             self.doublet_count += 1
             # Append Doublet object to mesh elements list
             self.elements.append(element)
-
         else:
             print("ERROR - Incorrect Element Format")
+
+    def create_vortex(self, vertices, surface, station, row):
+        new_vortex = self.Vortex(vertices, surface, station, row)
+        self.append_element(new_vortex)
+
+    def create_doublet(self, vertices, surface):
+        new_doublet = self.Doublet(vertices, surface)
+        self.append_element(new_doublet)
+
+    def get_vertices(self, vertex_ids):
+        vertex_list = []
+        for vertex_id in vertex_ids:
+            vertex_list.append(self.vertices[int(vertex_id)])
+        return vertex_list
+
+    def get_normals(self):
+        normals = []
+        for element in self.elements:
+            a = np.array(self.vertices[int(element.vertices[0])])
+            b = np.array(self.vertices[int(element.vertices[1])])
+            c = np.array(self.vertices[int(element.vertices[2])])
+            norm = np.cross(b - a, c - a)
+            norm_length = math.sqrt(np.dot(norm, norm))
+            if norm_length > 0:
+                norm = norm / norm_length
+            else:
+                norm = [0, 0, 0]
+            normals.append(norm)
+        return normals
+
+    def delete_element(self, element_id):
+        # Get element
+        type_of_element = self.elements[element_id].type
+        # Remove element
+        self.elements.pop(element_id)
+        if type_of_element == "Vortex":
+            # Update vortex count and IDs
+            self.vortex_count += -1
+            for element in self.elements:
+                if element.type == "Vortex" and element.id > element_id:
+                    element.id += -1
+        elif type_of_element == "Doublet":
+            # Update doublet count and IDs
+            self.doublet_count += -1
+            for element in self.elements:
+                if element.type == "Doublet" and element.id > element_id:
+                    element.id += -1
+        else:
+            print("ERROR - Incorrect Element Format")
+
+    def get_unused_vertices(self):
+        vertices_usage = np.zeros([len(self.vertices), 1])
+        for element in self.elements:
+            for vertex in element.vertices:
+                vertices_usage[int(vertex)] += 1
+        unused_vertices = []
+        for i in range(0, len(vertices_usage)):
+            if vertices_usage[i] == 0:
+                unused_vertices.append(i)
+        return unused_vertices
+
+    # def delete_unused_vertices(self):
+    #     vertices_usage = np.zeros([len(self.vertices), 1])
+    #     for element in self.elements:
+    #         for vertex in element.vertices:
+    #             vertices_usage[int(vertex)] += 1
 
     def update_surfaces(self):
         # Re-initialize element count in mesh surfaces
@@ -82,6 +182,28 @@ class Mesh:
                 # Create new surface in mesh and initialize element count to 1
                 self.surfaces.append(Mesh.Surface(element.surface, element.type, 1))
                 self.surface_count += 1
+
+
+def convert_doublet_to_mesh_object(mesh, vertex_table, element_table, surface):
+    if mesh is None:
+        mesh = Mesh()
+    for i in range(0, np.shape(vertex_table)[0]):
+        # mesh.append_vertex([vertex_table[i, 0], vertex_table[i, 1], vertex_table[i, 2]])
+        mesh.append_vertex(vertex_table[i, :])
+    for i in range(0, np.shape(element_table)[0]):
+        mesh.create_doublet(element_table[i, :], surface)
+    return mesh
+
+
+def convert_vortex_to_mesh_object(mesh, vertex_table, element_table, surface, stations, rows):
+    if mesh is None:
+        mesh = Mesh()
+    for i in range(0, np.shape(vertex_table)[0]):
+        # mesh.append_vertex([vertex_table[i, 0], vertex_table[i, 1], vertex_table[i, 2]])
+        mesh.append_vertex(vertex_table[i, :])
+    for i in range(0, np.shape(element_table)[0]):
+        mesh.create_vortex(element_table[i, :], surface, stations[i], rows[i])
+    return mesh
 
 
 def get_body_camber(su, sl):
@@ -142,9 +264,8 @@ def intersect_line_with_cst_body(p0, p1, param, precision):
             line_is_fully_inside_body = False
 
         else:
-            _, _, su_, sl_ = geo.build_body_surfaces([res[0]], [res[1]], param)
-            su = su_[0][0]
-            sl = sl_[0][0]
+            _, _, su, sl = geo.build_body_surfaces_complete([res[0]], [res[1]], param)
+
             # Check if point is located between CST surfaces
             if su >= vec_z[i] >= sl:
                 point_is_inside = 1
@@ -168,18 +289,14 @@ def intersect_line_with_cst_body(p0, p1, param, precision):
 
                 new_res = geo.get_domain_boundary(vec_x[i - 1], vec_y[i - 1],
                                                   vec_x[i] - vec_x[i - 1], vec_y[i] - vec_y[i - 1], param, 50)
-                x_, y_, su_, sl_ = geo.build_body_surfaces([new_res[0]], [new_res[1]], param)
-                su = su_[0][0]
-                sl = sl_[0][0]
+                _, _, su, sl = geo.build_body_surfaces_complete([new_res[0]], [new_res[1]], param)
 
             elif res_prev is None:
                 # domain, _ = geo.get_full_domain_boundary(25, 25, param)
 
                 new_res = geo.get_domain_boundary(vec_x[i], vec_y[i],
                                                   vec_x[i - 1] - vec_x[i], vec_y[i - 1] - vec_y[i], param, 50)
-                x_prev_, y_prev_, su_prev_, sl_prev_ = geo.build_body_surfaces([new_res[0]], [new_res[1]], param)
-                su_prev = su_prev_[0][0]
-                sl_prev = sl_prev_[0][0]
+                x_prev, y_prev, su_prev, sl_prev = geo.build_body_surfaces_complete([new_res[0]], [new_res[1]], param)
 
             # Check if intersection is on upper surface of CST body
             denominator_su = su - vec_z[i] - (su_prev - vec_z[i - 1])
@@ -497,24 +614,6 @@ def get_element_normal(elem_id, elem_table, vertex_table):
 #     return line_is_thru
 
 
-def intersect_line_triangle(q1, q2, p1, p2, p3):
-    def signed_tetra_volume(a, b, c, d):
-        return np.sign(np.dot(np.cross(b - a, c - a), d - a) / 6.0)
-
-    s1 = signed_tetra_volume(q1, p1, p2, p3)
-    s2 = signed_tetra_volume(q2, p1, p2, p3)
-
-    if s1 != s2:
-        s3 = signed_tetra_volume(q1, q2, p1, p2)
-        s4 = signed_tetra_volume(q1, q2, p2, p3)
-        s5 = signed_tetra_volume(q1, q2, p3, p1)
-        if s3 == s4 and s4 == s5:
-            n = np.cross(p2 - p1, p3 - p1)
-            t = np.dot(p1 - q1, n) / np.dot(q2 - q1, n)
-            return q1 + t * (q2 - q1)
-    return None
-
-
 # def check_all_intersections_with_body(elem_table_1, vertex_table_1, elem_table_2, vertex_table_2,
 #                                       int_factor, n_divisions):
 #
@@ -685,6 +784,9 @@ def merge_meshes(vert_table_1, elem_table_1, col_table_1, row_table_1, lift_tabl
 
 
 def get_repeated_elements(vertex_table):
+    distance_tol = 1e-9
+    # distance_tol = 0
+
     dim = np.shape(vertex_table)
     vertex_number = dim[0]
 
@@ -698,8 +800,12 @@ def get_repeated_elements(vertex_table):
             for j in vertices_to_check:
                 # Check if vertex i is equal to vertex j
                 vertex_j = vertex_table[j]
+
+                vertex_distance_square = (vertex_i[0] - vertex_j[0])**2 + (vertex_i[1] - vertex_j[1])**2 + (vertex_i[2] - vertex_j[2])**2
+
                 # Check if all 3 components are equal. Only implemented for 3D space
-                if vertex_i[0] == vertex_j[0] and vertex_i[1] == vertex_j[1] and vertex_i[2] == vertex_j[2]:
+                if vertex_distance_square <= distance_tol:
+                # if vertex_i[0] == vertex_j[0] and vertex_i[1] == vertex_j[1] and vertex_i[2] == vertex_j[2]:
                     transmute_vertex_to[j] = i
                     if i != j:
                         repeated_elements_count += 1
@@ -803,6 +909,23 @@ def reverse_array(array):
     return res
 
 
+def move_first_to_last(array):
+    res = np.zeros(np.shape(array))
+    if len(np.shape(array)) == 1:
+        for i in range(0, len(array)):
+            if i == 0:
+                res[-1] = array[0]
+            else:
+                res[i-1] = array[i]
+    elif len(np.shape(array)) == 2:
+        for i in range(0, np.shape(array)[0]):
+            if i == 0:
+                res[-1, :] = array[0, :]
+            else:
+                res[i-1, :] = array[i, :]
+    return res
+
+
 def merge_body_surfaces(x, y, su, sl):
     x_merged = []
     y_merged = []
@@ -838,30 +961,654 @@ def merge_body_surfaces(x, y, su, sl):
             y_merged = np.append(y_merged, [profile_y], axis=0)
             z_merged = np.append(z_merged, [profile_z], axis=0)
 
-    # Add loops back to the sides, in case surfaces are not connected
-    x_wrapped = [reverse_array(x_merged[0, :])]
-    y_wrapped = [reverse_array(y_merged[0, :])]
-    z_wrapped = [reverse_array(z_merged[0, :])]
-    for i in range(0, len(x_merged)):
-        x_wrapped = np.append(x_wrapped, [x_merged[i, :]], axis=0)
-        y_wrapped = np.append(y_wrapped, [y_merged[i, :]], axis=0)
-        z_wrapped = np.append(z_wrapped, [z_merged[i, :]], axis=0)
-    x_wrapped = np.append(x_wrapped, [reverse_array(x_merged[-1, :])], axis=0)
-    y_wrapped = np.append(y_wrapped, [reverse_array(y_merged[-1, :])], axis=0)
-    z_wrapped = np.append(z_wrapped, [reverse_array(z_merged[-1, :])], axis=0)
+    # # Add loop at the end of the profiles, to connect
+    # x_loop = np.reshape(x_merged[:, 0], (np.shape(x_merged[:, 0])[0], 1))
+    # y_loop = np.reshape(y_merged[:, 0], (np.shape(y_merged[:, 0])[0], 1))
+    # z_loop = np.reshape(z_merged[:, 0], (np.shape(z_merged[:, 0])[0], 1))
+    # x_merged = np.append(x_merged, x_loop, axis=1)
+    # y_merged = np.append(y_merged, y_loop, axis=1)
+    # z_merged = np.append(z_merged, z_loop, axis=1)
 
-    return x_wrapped, y_wrapped, z_wrapped
+    # # Add loops back to the sides, in case surfaces are not connected
+    # x_wrapped = [move_first_to_last(reverse_array(x_merged[0, :]))]
+    # y_wrapped = [move_first_to_last(reverse_array(y_merged[0, :]))]
+    # z_wrapped = [move_first_to_last(reverse_array(z_merged[0, :]))]
+    # for i in range(0, len(x_merged)):
+    #     x_wrapped = np.append(x_wrapped, [x_merged[i, :]], axis=0)
+    #     y_wrapped = np.append(y_wrapped, [y_merged[i, :]], axis=0)
+    #     z_wrapped = np.append(z_wrapped, [z_merged[i, :]], axis=0)
+    # x_wrapped = np.append(x_wrapped, [reverse_array(x_merged[-1, :])], axis=0)
+    # y_wrapped = np.append(y_wrapped, [reverse_array(y_merged[-1, :])], axis=0)
+    # z_wrapped = np.append(z_wrapped, [reverse_array(z_merged[-1, :])], axis=0)
+
+    # return x_wrapped, y_wrapped, z_wrapped
+    return x_merged, y_merged, z_merged
 
 
-def get_surface_mesh_tables(x, y, su, sl, is_lift_body, flatten, append_fake_body, triangulate):
+def intersect_line_triangle(q1, q2, p1, p2, p3):
+    def signed_tetra_volume(a, b, c, d):
+        return np.sign(np.dot(np.cross(b - a, c - a), d - a) / 6.0)
+
+    s1 = signed_tetra_volume(q1, p1, p2, p3)
+    s2 = signed_tetra_volume(q2, p1, p2, p3)
+
+    if s1 != s2:
+        s3 = signed_tetra_volume(q1, q2, p1, p2)
+        s4 = signed_tetra_volume(q1, q2, p2, p3)
+        s5 = signed_tetra_volume(q1, q2, p3, p1)
+        if s3 == s4 and s4 == s5:
+            n = np.cross(p2 - p1, p3 - p1)
+            t = np.dot(p1 - q1, n) / np.dot(q2 - q1, n)
+            return q1 + t * (q2 - q1)
+    return None
+
+
+def get_triangle_intersection(p, q):
+    def signed_tetra_volume(a, b, c, d):
+        return np.sign(np.dot(np.cross(b - a, c - a), d - a) / 6.0)
+
+    def get_intersection(a, b, x, y, z):
+        n = np.cross(y - x, z - x)
+        t = np.dot(x - a, n) / np.dot(b - a, n)
+        return a + t * (b - a)
+
+    def check_intersection(a, b, x, y, z):
+        s3 = signed_tetra_volume(a, b, x, y)
+        s4 = signed_tetra_volume(a, b, y, z)
+        s5 = signed_tetra_volume(a, b, z, x)
+        if s3 == s4 and s4 == s5:
+            return True
+        else:
+            return False
+
+    p0 = p[0]
+    p1 = p[1]
+    p2 = p[2]
+    q0 = q[0]
+    q1 = q[1]
+    q2 = q[2]
+
+    max_intersections = 7
+    intersections = []
+
+    # Check vertices of triangle P for intersections
+    v0 = signed_tetra_volume(p0, q0, q1, q2)
+    v1 = signed_tetra_volume(p1, q0, q1, q2)
+    v2 = signed_tetra_volume(p2, q0, q1, q2)
+    # Check edge p0-p1
+    if len(intersections) < max_intersections and v0 != v1:
+        if check_intersection(p0, p1, q0, q1, q2):
+            intersections.append([get_intersection(p0, p1, q0, q1, q2), [0, [0, 1]]])
+    # Check edge p0-p2
+    if len(intersections) < max_intersections and v0 != v2:
+        if check_intersection(p0, p2, q0, q1, q2):
+            intersections.append([get_intersection(p0, p2, q0, q1, q2), [0, [0, 2]]])
+    # Check edge p1-p2
+    if len(intersections) < max_intersections and v1 != v2:
+        if check_intersection(p1, p2, q0, q1, q2):
+            intersections.append([get_intersection(p1, p2, q0, q1, q2), [0, [1, 2]]])
+
+    # Check vertices of triangle Q for intersections
+    u0 = signed_tetra_volume(q0, p0, p1, p2)
+    u1 = signed_tetra_volume(q1, p0, p1, p2)
+    u2 = signed_tetra_volume(q2, p0, p1, p2)
+    # Check edge q0-q1
+    if len(intersections) < max_intersections and u0 != u1:
+        if check_intersection(q0, q1, p0, p1, p2):
+            intersections.append([get_intersection(q0, q1, p0, p1, p2), [1, [0, 1]]])
+    # Check edge q0-q2
+    if len(intersections) < max_intersections and u0 != u2:
+        if check_intersection(q0, q2, p0, p1, p2):
+            intersections.append([get_intersection(q0, q2, p0, p1, p2), [1, [0, 2]]])
+    # Check edge q1-q2
+    if len(intersections) < max_intersections and u1 != u2:
+        if check_intersection(q1, q2, p0, p1, p2):
+            intersections.append([get_intersection(q1, q2, p0, p1, p2), [1, [1, 2]]])
+
+    return intersections
+
+
+def do_boxes_intersect(box_1, box_2):
+    box_1_min = box_1[0]
+    box_1_max = box_1[1]
+    box_2_min = box_2[0]
+    box_2_max = box_2[1]
+    a = box_1_max[0] < box_2_min[0] or box_1_max[1] < box_2_min[1] or box_1_max[2] < box_2_min[2]
+    b = box_2_max[0] < box_1_min[0] or box_2_max[1] < box_1_min[1] or box_2_max[2] < box_1_min[2]
+    if not (a or b):
+        return True
+    else:
+        return False
+
+
+def get_distance_squared(vertex_1, vertex_2):
+    return (vertex_1[0] - vertex_2[0]) ** 2 + (vertex_1[1] - vertex_2[1]) ** 2 + (vertex_1[2] - vertex_2[2]) ** 2
+
+
+def combine_meshes(mesh1, mesh2, mode):
+    def get_element_boundaries(vertices):
+        vert_min = vertices[0]
+        vert_max = vert_min.copy()
+        for vertex in vertices:
+            vert_min = [min(vert_min[0], vertex[0]), min(vert_min[1], vertex[1]), min(vert_min[2], vertex[2])]
+            vert_max = [max(vert_max[0], vertex[0]), max(vert_max[1], vertex[1]), max(vert_max[2], vertex[2])]
+        return [vert_min, vert_max]
+
+    def decode_intersections(intersections_info, vertices_info):
+        res = intersections_info.copy()
+        for i in range(0, len(intersections_info)):
+            res[i][1][1][0] = vertices_info[int(res[i][1][0])][int(res[i][1][1][0])]
+            res[i][1][1][1] = vertices_info[int(res[i][1][0])][int(res[i][1][1][1])]
+        return res
+
+    def initiate_permutations(vertices_list):
+        res = []
+        for vertex in vertices_list:
+            res.append([vertex.copy()])
+        return res
+
+    def append_permutation(permutations, new_permutation):
+        location = new_permutation[0]
+        for vertex_id in new_permutation[1][1]:
+            vertex_id = int(vertex_id)
+            permutations[vertex_id].append(location)
+        return permutations
+
+    def get_number_of_vertices_with_permutations(permutations):
+        permute_number = 0
+        for i in range(0, len(permutations)):
+            if len(permutations[i]) > 1:
+                permute_number += 1
+        return permute_number
+
+    def get_closest_location_to_vertex(permutations):
+        permute_vertex_to = []
+        permuted_vertices = []
+        permute_count = 0
+        for i in range(0, len(permutations)):
+            if len(permutations[i]) == 1:
+                permute_vertex_to.append(permutations[i][0])
+            else:
+                permute_count += 1
+                permuted_vertices.append(i)
+                min_dist_square = 1e15
+                best_permute_yet = 1
+                for j in range(1, len(permutations[i])):
+                    dist_square = get_distance_squared(permutations[i][0], permutations[i][j])
+                    if dist_square <= min_dist_square:
+                        min_dist_square = dist_square
+                        best_permute_yet = j
+                permute_vertex_to.append(permutations[i][best_permute_yet])
+        return permute_vertex_to, permuted_vertices, permute_count
+
+    def apply_permutations(mesh, permutations):
+        if len(mesh.vertices) == len(permutations):
+            mesh.vertices = permutations
+        else:
+            print("Vertices list length does not match permutations list length")
+        return mesh
+
+    # def add_vertices_to_mesh(mesh, vertices):
+    #     vertices_index = []
+    #     for vertex in vertices:
+    #         vertex_id = mesh.append_vertex(vertex)
+    #         vertices_index.append(vertex_id)
+    #     return mesh, vertices_index
+    #
+    # def split_element_2in(mesh, element_id, point_1_id, point_2_id):
+    #     # Remove 1 element, add 5 elements
+    #     replaced_elem = mesh.elements[element_id]
+    #     vert_1 = mesh.vertices[int(replaced_elem.vertices[0])]
+    #     vert_2 = mesh.vertices[int(replaced_elem.vertices[1])]
+    #     vert_3 = mesh.vertices[int(replaced_elem.vertices[2])]
+    #     surface = replaced_elem.surface
+    #     # Get closest element vertex to point_1
+    #     point_1 = mesh.vertices[int(point_1_id)]
+    #     point_2 = mesh.vertices[int(point_2_id)]
+    #
+    #     dist_1_squared = get_distance_squared(point_1, vert_1)
+    #     dist_2_squared = get_distance_squared(point_1, vert_2)
+    #     dist_3_squared = get_distance_squared(point_1, vert_3)
+    #
+    #     new_elem_1 = [replaced_elem.vertices[0], replaced_elem.vertices[1], point_1_id]
+    #     new_elem_2 = [replaced_elem.vertices[0], point_2_id, point_1_id]
+    #     new_elem_3 = [replaced_elem.vertices[1], point_1_id, replaced_elem.vertices[2]]
+    #     new_elem_4 = [replaced_elem.vertices[0], replaced_elem.vertices[2], point_2_id]
+    #     new_elem_5 = [point_2_id, replaced_elem.vertices[2], point_1_id]
+    #
+    #     mesh.create_doublet(new_elem_1, surface)
+    #     mesh.create_doublet(new_elem_2, surface)
+    #     mesh.create_doublet(new_elem_3, surface)
+    #     mesh.create_doublet(new_elem_4, surface)
+    #     mesh.create_doublet(new_elem_5, surface)
+    #     mesh.delete_element(element_id)
+    #     return mesh
+    #
+    # def split_element_2edge(mesh, element_id, point1, point2):
+    #     pass
+    #
+    # def split_element_1in1edge(mesh, element_id, point_in, point_edge):
+    #     pass
+
+    intersection_list_1 = []
+    intersection_list_2 = []
+    permutations_1 = initiate_permutations(mesh1.vertices)
+    permutations_2 = initiate_permutations(mesh2.vertices)
+    for element1 in mesh1.elements:
+        intersects = False
+        if len(element1.vertices) == 3:
+            p_vertices = mesh1.get_vertices(element1.vertices)
+            p_bounds = get_element_boundaries(p_vertices)
+            for element2 in mesh2.elements:
+                if len(element2.vertices) == 3:
+                    q_vertices = mesh2.get_vertices(element2.vertices)
+                    q_bounds = get_element_boundaries(q_vertices)
+
+                    # Only run the intersection check if boxes intersect
+                    if do_boxes_intersect(p_bounds, q_bounds):
+                        intersections = get_triangle_intersection(p_vertices, q_vertices)
+                        decoded_intersections = decode_intersections(intersections, [element1.vertices, element2.vertices])
+                        for decoded_intersection in decoded_intersections:
+                            if decoded_intersection[1][0] == 0:
+                                permutations_1 = append_permutation(permutations_1, decoded_intersection)
+                            elif decoded_intersection[1][0] == 1:
+                                permutations_2 = append_permutation(permutations_2, decoded_intersection)
+
+                        if len(intersections) == 2:
+                            intersects = True
+                            intersection_list_2.append(element2.id)
+                        elif len(intersections) == 1 or len(intersections) > 2:
+                            # This should not happen
+                            print(len(intersections), "h")
+
+            if intersects:
+                intersection_list_1.append(element1.id)
+
+    transmute_1, permuted_1, n1_permutes = get_closest_location_to_vertex(permutations_1)
+    transmute_2, permuted_2, n2_permutes = get_closest_location_to_vertex(permutations_2)
+    mesh1 = apply_permutations(mesh1, transmute_1)
+    mesh2 = apply_permutations(mesh2, transmute_2)
+
+    # n1 = get_number_of_vertices_with_permutations(permutations_1)
+    # n2 = get_number_of_vertices_with_permutations(permutations_2)
+    # if n1 <= n2:
+    #     transmute_1 = get_closest_location_to_vertex(permutations_1)
+    #     apply_permutations(mesh1, transmute_1)
+    # else:
+    #     transmute_2 = get_closest_location_to_vertex(permutations_2)
+    #     apply_permutations(mesh2, transmute_2)
+
+    return intersection_list_1, intersection_list_2, mesh1, mesh2, permuted_1, permuted_2
+
+
+def refine_mesh(param, vertex_table, elem_table, norm_table, lift_table, refine_info):
+    def clear_elem(elem_id):
+        np.delete(elem_table, elem_id, axis=1)
+        np.delete(norm_table, elem_id, axis=1)
+        np.delete(lift_table, elem_id, axis=1)
+
+    def split_triangle(elem_id):
+
+        clear_elem(elem_id)
+
+
+def get_surface_mesh_tables_v2(body, mesh, mode, is_vortex):
+    def get_triangle_area_square(vertices):
+        point_a = np.array(mesh.vertices[int(vertices[0])])
+        point_b = np.array(mesh.vertices[int(vertices[1])])
+        point_c = np.array(mesh.vertices[int(vertices[2])])
+        n = cross_product(point_b - point_a, point_c - point_a)
+        area_square = (n[0] ** 2 + n[1] ** 2 + n[2] ** 2) / 4
+        return area_square
+
+    def mesh_rectangle(vertices):
+        if np.shape(vertices) == (2, 2):
+            rectangle = [vertices[0, 0], vertices[0, 1], vertices[1, 1], vertices[1, 0]]
+            if is_vortex:
+                pass
+            else:
+                mesh.create_doublet(rectangle, surface_id)
+
+    def mesh_rectangle_to_triangles(vertices):
+        if np.shape(vertices) == (2, 2):
+            # Two ways to cut the shape into triangles
+            # Arrangement 1
+            triangle_1a = [vertices[0, 0], vertices[0, 1], vertices[1, 1]]
+            triangle_1b = [vertices[0, 0], vertices[1, 1], vertices[1, 0]]
+            # Measure the "greatness" of these two triangles
+            area_min_1 = get_triangle_area_square(triangle_1a)
+            area_min_1 = min(area_min_1, get_triangle_area_square(triangle_1b))
+
+            # Arrangement 2
+            triangle_2a = [vertices[1, 0], vertices[0, 0], vertices[0, 1]]
+            triangle_2b = [vertices[1, 0], vertices[0, 1], vertices[1, 1]]
+            # Measure the "greatness" of these two triangles
+            area_min_2 = get_triangle_area_square(triangle_2a)
+            area_min_2 = min(area_min_2, get_triangle_area_square(triangle_2b))
+
+            # Choose the best arrangement, currently based on triangles area
+            if area_min_1 < area_min_2:
+                # Arrangement 2 is superior
+                mesh.create_doublet(triangle_2a, surface_id)
+                mesh.create_doublet(triangle_2b, surface_id)
+            else:
+                # Arrangement 1 is superior
+                mesh.create_doublet(triangle_1a, surface_id)
+                mesh.create_doublet(triangle_1b, surface_id)
+
+    def mesh_grid(vertex_addressing, clockwise, verify_vertices):
+        shape = np.shape(vertex_addressing)
+        for i in range(0, shape[0] - 1):
+            for j in range(0, shape[1] - 1):
+                do_mesh = True
+                vertices = vertex_addressing[i:i + 2, j:j + 2]
+                # Transpose vertices to reverse the order of vertices if not clockwise
+                if not clockwise:
+                    vertices = vertices.transpose()
+
+                # If specified, make sure the vertices are valid (more than 2 unique vertices)
+                if verify_vertices:
+                    if len(np.unique(vertices)) < 3:
+                        do_mesh = False
+
+                if do_mesh:
+                    if mode == "Structured":
+                        mesh_rectangle(vertices)
+                    else:
+                        mesh_rectangle_to_triangles(vertices)
+
+    def get_vertices_address(x, y, z):
+        shape = np.shape(x)
+        vertices_nb = len(mesh.vertices)
+        vertex_addressing = np.zeros(np.shape(x))
+        for i in range(0, shape[0]):
+            for j in range(0, shape[1]):
+                vertex_index = i * shape[1] + j + vertices_nb
+                vertex_addressing[i, j] = vertex_index
+                mesh.append_vertex([x[i, j], y[i, j], z[i, j]])
+        return vertex_addressing
+
+    def stitch_addressing(vertex_addressing_1, vertex_addressing_2, tol):
+        shape_1 = np.shape(vertex_addressing_1)
+        shape_2 = np.shape(vertex_addressing_2)
+        tol_square = tol ** 2
+        # Run through all addresses in first grid and compare to all elements in second grid
+        for i1 in range(0, shape_1[0]):
+            for j1 in range(0, shape_1[1]):
+                address_1 = vertex_addressing_1[i1, j1]
+                vertex_1 = mesh.vertices[int(address_1)]
+                for i2 in range(0, shape_2[0]):
+                    for j2 in range(0, shape_2[1]):
+                        address_2 = vertex_addressing_2[i2, j2]
+                        vertex_2 = mesh.vertices[int(address_2)]
+                        # Get distance squared
+                        distance_square = (vertex_1[0] - vertex_2[0]) ** 2 + \
+                                          (vertex_1[1] - vertex_2[1]) ** 2 + (vertex_1[2] - vertex_2[2]) ** 2
+                        # If vertices are the same, set vertex_address_2 equal to vertex_address_1
+                        if distance_square <= tol_square:
+                            vertex_addressing_1[i1, j1] = address_2
+        return vertex_addressing_1
+
+    distance_tol = 1e-14
+    # Initiate Mesh object if not already provided
+    if mesh is None:
+        mesh = Mesh()
+        surface_id = 0
+    else:
+        # New surface ID ***
+        surface_id = 0
+
+    # Get body surfaces
+    surfaces = body.get_body_surfaces()
+    associativity = body.associativity
+
+    vertex_addressing_list = []
+    for surface in surfaces:
+        # Get basic addressing of surface
+        surface_addressing = get_vertices_address(surface[0], surface[1], surface[2])
+
+        # Stitch addressing of surface with itself
+        stitched_surface_addressing = stitch_addressing(surface_addressing, surface_addressing, distance_tol)
+
+        vertex_addressing_list.append(stitched_surface_addressing)
+
+    for stitch in associativity:
+        id_1 = stitch[1][0]
+        id_2 = stitch[1][1]
+        if stitch[0] == "su_sl":
+            updated_vertex_addressing = stitch_addressing(vertex_addressing_list[id_1],
+                                                          vertex_addressing_list[id_2], distance_tol)
+            vertex_addressing_list[id_1] = updated_vertex_addressing
+
+    # for vertex_addressing_array in vertex_addressing_list:
+    for k in range(0, len(vertex_addressing_list)):
+        vertex_addressing_array = vertex_addressing_list[k]
+        order_vertices_clockwise = True
+        if body.surfaces[k].ID == "Lower":
+            order_vertices_clockwise = False
+        mesh_grid(vertex_addressing_array, clockwise=order_vertices_clockwise, verify_vertices=True)
+
+    for stitch in associativity:
+        id_1 = stitch[1][0]
+        id_2 = stitch[1][1]
+        stitch_shape_1 = np.shape(vertex_addressing_list[id_1])
+        stitch_shape_2 = np.shape(vertex_addressing_list[id_2])
+
+        if stitch[0] == "neighbour_PX":
+            if stitch_shape_1[0] == stitch_shape_2[0]:
+                stitch_vertices = np.vstack([vertex_addressing_list[id_1][stitch_shape_1[0], :],
+                                             vertex_addressing_list[id_2][0, :]])
+                mesh_grid(stitch_vertices, clockwise=True, verify_vertices=True)
+            else:
+                print("Error - Edges to stitch do not match in length")
+
+        elif stitch[0] == "neighbour_MX":
+            if stitch_shape_1[0] == stitch_shape_2[0]:
+                stitch_vertices = np.vstack([vertex_addressing_list[id_1][0, :],
+                                             vertex_addressing_list[id_2][stitch_shape_2[0], :]])
+                mesh_grid(stitch_vertices, clockwise=True, verify_vertices=True)
+            else:
+                print("Error - Edges to stitch do not match in length")
+
+        elif stitch[0] == "neighbour_PY":
+            if stitch_shape_1[0] == stitch_shape_2[0]:
+                stitch_vertices = np.vstack([vertex_addressing_list[id_1][:, stitch_shape_1[1]],
+                                             vertex_addressing_list[id_2][:, 0]])
+                mesh_grid(stitch_vertices, clockwise=True, verify_vertices=True)
+            else:
+                print("Error - Edges to stitch do not match in length")
+
+        elif stitch[0] == "neighbour_MY":
+            if stitch_shape_1[0] == stitch_shape_2[0]:
+                stitch_vertices = np.vstack([vertex_addressing_list[id_1][:, 0],
+                                             vertex_addressing_list[id_2][:, stitch_shape_2[1]]])
+                mesh_grid(stitch_vertices, clockwise=True, verify_vertices=True)
+            else:
+                print("Error - Edges to stitch do not match in length")
+
+    mesh.update_surfaces()
+    return mesh
+
+
+def get_surface_mesh_tables_v1(x, y, su, sl, is_lift_body):
+    def get_triangle_area_square(vertices_table, vertices):
+        point_a = vertices_table[int(vertices[0])]
+        point_b = vertices_table[int(vertices[1])]
+        point_c = vertices_table[int(vertices[2])]
+        n = cross_product(point_b - point_a, point_c - point_a)
+        area_square = (n[0] ** 2 + n[1] ** 2 + n[2] ** 2) / 4
+        return area_square
+
+    # def point_inside_triangle(px, py, p0x, p0y, p1x, p1y, p2x, p2y):
+    #     Area = 0.5 * (-p1y * p2x + p0y * (-p1x + p2x) + p0x * (p1y - p2y) + p1x * p2y)
+    #     if Area != 0:
+    #         s = 1 / (2 * Area) * (p0y * p2x - p0x * p2y + (p2y - p0y) * px + (p0x - p2x) * py)
+    #         t = 1 / (2 * Area) * (p0x * p1y - p0y * p1x + (p0y - p1y) * px + (p1x - p0x) * py)
+    #         if s >= 0 and t >= 0 and 1-s-t >= 0:
+    #             return True, s, t
+    #         else:
+    #             return False, s, t
+    #     else:
+    #         return False, 0, 0
+    #
+    # def insert_point(element_table, vertices, point):
+    #     # Find element inside which the point resides
+    #     for k in range(0, np.shape(element_table)[0]):
+    #         p0 = vertices[int(element_table[k, 0]), :]
+    #         p1 = vertices[int(element_table[k, 1]), :]
+    #         p2 = vertices[int(element_table[k, 2]), :]
+    #         is_point_inside, s, t = point_inside_triangle(point[0], point[1], p0[0], p0[1], p1[0], p1[1], p2[0], p2[1])
+    #         if is_point_inside:
+    #             interpolate = s * (p1[2] - p0[2]) + t * (p2[2] - p0[2]) + (1 - s - t) * (p2[2] - p1[2])
+    #             print(p0[0], interpolate)
+
+    def mesh_triangle(element_table, vertices):
+        if len(vertices) == 3:
+            element_table = np.append(element_table, [vertices], axis=0)
+        return element_table
+
+    def mesh_rectangle_to_triangles(vertices_table, element_table, vertices):
+        if np.shape(vertices) == (2, 2):
+            # Two ways to cut the shape into triangles
+            # Arrangement 1
+            triangle_1a = [vertices[0, 0], vertices[0, 1], vertices[1, 1]]
+            triangle_1b = [vertices[0, 0], vertices[1, 1], vertices[1, 0]]
+            # Measure the "greatness" of these two triangles
+            area_min_1 = get_triangle_area_square(vertices_table, triangle_1a)
+            area_min_1 = min(area_min_1, get_triangle_area_square(vertices_table, triangle_1b))
+
+            # Arrangement 2
+            triangle_2a = [vertices[1, 0], vertices[0, 1], vertices[0, 0]]
+            triangle_2b = [vertices[1, 0], vertices[1, 1], vertices[0, 1]]
+            # Measure the "greatness" of these two triangles
+            area_min_2 = get_triangle_area_square(vertices_table, triangle_2a)
+            area_min_2 = min(area_min_2, get_triangle_area_square(vertices_table, triangle_2b))
+
+            # Choose the best arrangement, currently based on triangles area
+            if area_min_1 < area_min_2:
+                # Arrangement 2 is superior
+                element_table = mesh_triangle(element_table, triangle_2a)
+                element_table = mesh_triangle(element_table, triangle_2b)
+            else:
+                # Arrangement 1 is superior
+                element_table = mesh_triangle(element_table, triangle_1a)
+                element_table = mesh_triangle(element_table, triangle_1b)
+        return element_table
+
+    distance_tol = 1e-16
+    # Initialize elem_table with element pointing to vertices [0, 0, 0], such that it is deleted by the cleanup
+    elem_table = np.zeros([1, 3])
+
+    if np.shape(x) == np.shape(y):
+        shape = np.shape(x)
+
+        # Flatten x and y vertices into a vertex table
+        vertex_table_length = shape[0] * shape[1] * 2
+        vertex_table = np.zeros([vertex_table_length, 3])
+        vertex_address_su = np.zeros(np.shape(x))
+        vertex_address_sl = np.zeros(np.shape(x))
+        for i in range(0, shape[0]):
+            for j in range(0, shape[1]):
+                vertex_index_su = i * shape[1] + j
+                vertex_address_su[i, j] = vertex_index_su
+                vertex_table[vertex_index_su, 0] = x[i, j]
+                vertex_table[vertex_index_su, 1] = y[i, j]
+                vertex_table[vertex_index_su, 2] = su[i, j]
+
+                # Check if su and sl vertices are close enough to be considered equal
+                # In case not equal, identify to add element on edge
+                if abs(su[i, j] - sl[i, j]) <= distance_tol:
+                    vertex_index_sl = vertex_index_su
+                else:
+                    vertex_index_sl = (shape[0] + i) * shape[1] + j
+                vertex_address_sl[i, j] = vertex_index_sl
+                vertex_table[vertex_index_sl, 0] = x[i, j]
+                vertex_table[vertex_index_sl, 1] = y[i, j]
+                vertex_table[vertex_index_sl, 2] = sl[i, j]
+
+        for i in range(0, shape[0] - 1):
+            for j in range(0, shape[1] - 1):
+                vertices_su = vertex_address_su[i:i + 2, j:j + 2]
+                elem_table = mesh_rectangle_to_triangles(vertex_table, elem_table, vertices_su)
+
+                vertices_sl = vertex_address_sl[i:i + 2, j:j + 2]
+                elem_table = mesh_rectangle_to_triangles(vertex_table, elem_table, vertices_sl)
+
+        for i in range(0, shape[0] - 1):
+            for j in [0, shape[1] - 1]:
+                # Check if element is needed in between surfaces
+                vert_1_check = vertex_address_su[i, j] == vertex_address_sl[i, j]
+                vert_2_check = vertex_address_su[i + 1, j] == vertex_address_sl[i + 1, j]
+                if vert_1_check and vert_2_check:
+                    # Then no element needs to be added
+                    pass
+                elif vert_1_check:
+                    # Add 1 element
+                    elem_table = mesh_triangle(elem_table, [vertex_address_su[i, j], vertex_address_su[i + 1, j],
+                                                            vertex_address_sl[i + 1, j]])
+                elif vert_2_check:
+                    elem_table = mesh_triangle(elem_table, [vertex_address_su[i, j], vertex_address_su[i + 1, j],
+                                                            vertex_address_sl[i, j]])
+                else:
+                    # At least 1 element needs to be added
+                    side_vertices = np.reshape([vertex_address_su[i, j], vertex_address_su[i + 1, j],
+                                                vertex_address_sl[i, j], vertex_address_sl[i + 1, j]], (2, 2))
+                    elem_table = mesh_rectangle_to_triangles(vertex_table, elem_table, side_vertices)
+
+        for i in [0, shape[0] - 1]:
+            for j in range(0, shape[1] - 1):
+                # Check if element is needed in between surfaces
+                vert_1_check = vertex_address_su[i, j] == vertex_address_sl[i, j]
+                vert_2_check = vertex_address_su[i, j + 1] == vertex_address_sl[i, j + 1]
+                if vert_1_check and vert_2_check:
+                    # Then no element needs to be added
+                    pass
+                elif vert_1_check:
+                    # Add 1 element
+                    elem_table = mesh_triangle(elem_table, [vertex_address_su[i, j], vertex_address_su[i, j + 1],
+                                                            vertex_address_sl[i, j + 1]])
+                elif vert_2_check:
+                    elem_table = mesh_triangle(elem_table, [vertex_address_su[i, j], vertex_address_su[i, j + 1],
+                                                            vertex_address_sl[i, j]])
+                else:
+                    # At least 1 element needs to be added
+                    side_vertices = np.reshape([vertex_address_su[i, j], vertex_address_su[i, j + 1],
+                                                vertex_address_sl[i, j], vertex_address_sl[i, j + 1]], (2, 2))
+                    elem_table = mesh_rectangle_to_triangles(vertex_table, elem_table, side_vertices)
+
+        # Generate lift table
+        if is_lift_body:
+            lift_table = np.ones([np.shape(elem_table)[0]+1, 1])
+        else:
+            lift_table = np.zeros([np.shape(elem_table)[0]+1, 1])
+
+        # Cleanup the mesh
+        transmute_vertex_to = get_repeated_elements(vertex_table)
+        elem_table, vertex_table = transmute_vertices(transmute_vertex_to, elem_table, vertex_table)
+        norm_table = get_normals_table(elem_table, vertex_table)
+        elements_to_keep = get_shadow_elements(norm_table)
+        norm_table, elem_table, lift_table = remove_mesh_elements(elements_to_keep, norm_table, elem_table, lift_table)
+
+    else:
+        vertex_table = []
+        elem_table = []
+        norm_table = []
+        lift_table = []
+
+    return vertex_table, elem_table, norm_table, lift_table
+
+
+def get_surface_mesh_tables(x_ini, y_ini, su_ini, sl_ini, is_lift_body, flatten, append_fake_body, triangulate):
     if flatten:
-        lift_bodies = set_lift_property(x, is_lift_body)
-        z = (su + sl) / 2
+        lift_bodies = set_lift_property(x_ini, is_lift_body)
+        x = x_ini
+        y = y_ini
+        z = (su_ini + sl_ini) / 2
         if append_fake_body:
-            x, y, z, lift_bodies = append_plane_body_to_wing_surface(x, y, z, lift_bodies)
+            x, y, z, lift_bodies = append_plane_body_to_wing_surface(x_ini, y_ini, z, lift_bodies)
         # z = set_lift_property(x, 0)
     else:
-        x, y, z = merge_body_surfaces(x, y, su, sl)
+        x, y, z = merge_body_surfaces(x_ini, y_ini, su_ini, sl_ini)
         lift_bodies = set_lift_property(x, is_lift_body)
 
     if np.shape(x) == np.shape(y):
@@ -1012,8 +1759,9 @@ def get_vortex_mesh(x, y, su, sl, is_lift_body, append_fake_body):
         column_table = []
         row_table = []
         lift_table = []
+        norm_table = []
 
-    return vertex_table, elem_table, column_table, row_table, lift_table
+    return vertex_table, elem_table, column_table, row_table, lift_table, norm_table
 
 
 def append_plane_body_to_wing_surface(x_list, y_list, z_list, lift_bodies):
@@ -1078,6 +1826,19 @@ def append_plane_body_to_wing_surface(x_list, y_list, z_list, lift_bodies):
     return new_x_list, new_y_list, new_z_list, new_lift_bodies
 
 
+def measure_area_of_triangles(vertex_table, elem_table):
+    area_table = np.zeros((np.shape(elem_table)[0], 1))
+    for i in range(0, np.shape(elem_table)[0]):
+        point_a = vertex_table[int(elem_table[i, 0])]
+        point_b = vertex_table[int(elem_table[i, 1])]
+        point_c = vertex_table[int(elem_table[i, 2])]
+        n = cross_product(point_b - point_a, point_c - point_a)
+        area_table[i, 0] = math.sqrt(n[0] ** 2 + n[1] ** 2 + n[2] ** 2) / 2
+        if area_table[i, 0] < 1e-8:
+            print(i, area_table[i, 0])
+    return area_table
+
+
 def visualize_mesh(vertex_table, elem_table):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
@@ -1139,7 +1900,17 @@ def visualize_mesh_elements(elements, vertex_table, elem_table, figure):
     return ax
 
 
-def visualize_lines(ax, list_of_points):
+def visualize_profile_lines(ax, x, y, z, color, linewidth):
+    if len(np.shape(x)) == 1:
+        ax.plot3D(x, y, z, linewidth=linewidth, color=color)
+    elif len(np.shape(x)) == 2:
+        for i in range(0, np.shape(x)[0]):
+            ax.plot3D(x[i, :], y[i, :], z[i, :], linewidth=linewidth, color=color)
+    return ax
+
+
+def visualize_lines(ax, list_of_points, linewidth):
+    color = (0, 0, 0)
     x = []
     y = []
     z = []
@@ -1147,8 +1918,178 @@ def visualize_lines(ax, list_of_points):
         x.append(point[0])
         y.append(point[1])
         z.append(point[2])
-    ax.plot3D(x, y, z)
+    ax.plot3D(x, y, z, linewidth=linewidth, color=color)
 
     return ax
 
 
+def visualize_points(ax, list_of_points, size):
+    color = (0.1, 0.1, 0.1)
+    x = []
+    y = []
+    z = []
+    s = []
+    for point in list_of_points:
+        x.append(point[0])
+        y.append(point[1])
+        z.append(point[2])
+        s.append(size)
+    ax.scatter(x, y, z, s=s, color=color, marker="x")
+
+    return ax
+
+
+def visualize_profile(ax, x, y, su, sl, color_base, alpha, linewidth):
+    N1 = 0
+    N2 = np.shape(x)[0]
+    for i in range(N1, N2):
+        color = (color_base[0]*(N2 - i)/(N2 - N1), color_base[1]*(N2 - i)/(N2 - N1), color_base[2]*(N2 - i)/(N2 - N1))
+        x_full, y_full, z_full = exp.cleanup_airfoil(x[i, :], y[i, :], su[i, :], sl[i, :])
+        polygon = [list(zip(x_full, y_full, z_full))]
+        poly = Poly3DCollection(polygon)
+        poly.set_linewidth(0)
+        poly.set_alpha(alpha)
+        poly.set_color(color)
+
+        ax.plot3D(x_full, y_full, z_full, color=color, linewidth=linewidth)
+        ax.add_collection3d(poly)
+
+    return ax
+
+
+def print_polygons(ax, vertices, elements, normals, color_1, color_2, alpha, line):
+    if ax is None:
+        fig = plt.figure()
+        ax = Axes3D(fig, auto_add_to_figure=False)
+        fig.add_axes(ax)
+
+    for i in range(0, np.shape(elements)[0]):
+        elem = elements[i, :]
+        norm = normals[i, :]
+        direction = [0, 0, 1]
+        luminosity = abs(dot_product(norm, direction))
+        color_mix = [0, 0, 0]
+        for j in range(0, len(color_mix)):
+            color_mix[j] = color_1[j] * luminosity + color_2[j] * (1 - luminosity)
+        color = (color_mix[0], color_mix[1], color_mix[2])
+        x = []
+        y = []
+        z = []
+        for j in range(0, len(elem)):
+            vert_id = int(elem[j])
+            x.append(vertices[vert_id, 0])
+            y.append(vertices[vert_id, 1])
+            z.append(vertices[vert_id, 2])
+        triangle = [list(zip(x, y, z))]
+        poly = Poly3DCollection(triangle)
+        poly.set_linewidth(line)
+        poly.set_alpha(alpha)
+        poly.set_facecolor(color)
+        poly.set_edgecolor((0, 0, 0))
+        ax.add_collection3d(poly)
+
+    return ax
+
+
+def print_mesh_as_polygons(ax, mesh, color_1, color_2, alpha, line):
+    if ax is None:
+        fig = plt.figure()
+        ax = Axes3D(fig, auto_add_to_figure=False)
+        fig.add_axes(ax)
+        x_lim = [1e15, -1e15]
+        y_lim = [1e15, -1e15]
+        z_lim = [1e15, -1e15]
+    else:
+        x_lim = [ax.get_xlim()[0], ax.get_xlim()[1]]
+        y_lim = [ax.get_ylim()[0], ax.get_ylim()[1]]
+        z_lim = [ax.get_zlim()[0], ax.get_zlim()[1]]
+
+    elements = mesh.elements
+    vertices = mesh.vertices
+    normals = mesh.get_normals()
+    for i in range(0, len(elements)):
+        elem = mesh.elements[i].vertices
+        norm = normals[i]
+        direction = [0, 0, 1]
+        luminosity = abs(dot_product(norm, direction))
+        color_mix = [0, 0, 0]
+        for j in range(0, len(color_mix)):
+            color_mix[j] = color_1[j] * luminosity + color_2[j] * (1 - luminosity)
+        color = (color_mix[0], color_mix[1], color_mix[2])
+        x = []
+        y = []
+        z = []
+        for j in range(0, len(elem)):
+            vert_id = int(elem[j])
+            x.append(vertices[vert_id][0])
+            y.append(vertices[vert_id][1])
+            z.append(vertices[vert_id][2])
+
+            # Look for larger limits
+            x_lim[0] = min(x_lim[0], x[j])
+            y_lim[0] = min(y_lim[0], y[j])
+            z_lim[0] = min(z_lim[0], z[j])
+            x_lim[1] = max(x_lim[1], x[j])
+            y_lim[1] = max(y_lim[1], y[j])
+            z_lim[1] = max(z_lim[1], z[j])
+
+        # Add polygon to plot
+        triangle = [list(zip(x, y, z))]
+        poly = Poly3DCollection(triangle)
+        poly.set_linewidth(line)
+        poly.set_alpha(alpha)
+        poly.set_facecolor(color)
+        poly.set_edgecolor((0, 0, 0))
+        ax.add_collection3d(poly)
+
+    lim_delta_max = max(x_lim[1] - x_lim[0], y_lim[1] - y_lim[0], z_lim[1] - z_lim[0])
+    ax.set_xlim((x_lim[0] + x_lim[1] - lim_delta_max) / 2, (x_lim[0] + x_lim[1] + lim_delta_max) / 2)
+    ax.set_ylim((y_lim[0] + y_lim[1] - lim_delta_max) / 2, (y_lim[0] + y_lim[1] + lim_delta_max) / 2)
+    ax.set_zlim((z_lim[0] + z_lim[1] - lim_delta_max) / 2, (z_lim[0] + z_lim[1] + lim_delta_max) / 2)
+
+    return ax
+
+
+def visualize_wireframe(ax, x, y, z, color, alpha, linewidth, r, c):
+    ax.plot_wireframe(x, y, z, rstride=r, cstride=c, color=color, linewidth=linewidth, alpha=alpha)
+    return ax
+
+
+def visualize_points_as_text(ax, list_of_points, displacement, direction, size, color):
+    for i in range(0, np.shape(list_of_points)[0]):
+        x = list_of_points[i, 0]
+        y = list_of_points[i, 1]
+        z = list_of_points[i, 2]
+        label = "(%.1f, %.1f, %.1f)" % (x, y, z)
+        ax.text(x + displacement[0], y + displacement[1], z + displacement[2], label, zdir=direction, color=color, fontsize=size)
+    return ax
+
+
+def visualize_text(ax, list_of_points, labels, displacement, direction, size, color):
+    for i in range(0, np.shape(list_of_points)[0]):
+        x = list_of_points[i, 0]
+        y = list_of_points[i, 1]
+        z = list_of_points[i, 2]
+        label = labels[i]
+        ax.text(x + displacement[0], y + displacement[1], z + displacement[2], label, zdir=direction, color=color, fontsize=size)
+    return ax
+
+
+def set_plot_properties(ax):
+    # ax.set_axis_off()
+    # ax.set_xlim(-1.5, 3.5)
+    # ax.set_ylim(0, 5)
+    # ax.set_zlim(-2.5, 2.5)
+    # # ax.view_init(elev=30, azim=-50)
+    # # ax.dist = 7
+    # ax.view_init(elev=15, azim=-90)
+    # ax.dist = 3
+
+    ax.set_axis_off()
+    ax.set_xlim(-7.5, 7.5)
+    ax.set_ylim(-7.5, 7.5)
+    ax.set_zlim(-7.5, 7.5)
+    # ax.view_init(elev=30, azim=-50)
+    # ax.dist = 7
+    ax.view_init(elev=30, azim=-30)
+    ax.dist = 5
