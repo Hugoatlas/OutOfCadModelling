@@ -259,11 +259,26 @@ def export_mesh(filename, mesh):
                 string += "\n"
                 f.write(string)
 
-    # def write_wing_stations(elements):
-    #     # Get all ids of wing stations
-    #     wing_station_ids = []
-    #     for element in elements:
-    #         pass
+    def write_wingstations(wingstations):
+        # Loop through all wingstations
+        for wingstation in wingstations:
+            string = "WINGSTATION " + str(wingstation.id)
+            # Run through all elements and add if it is part of surface
+            for element_id in wingstation.elements:
+                string += " " + str(element_id)
+            string += "\n"
+            f.write(string)
+
+    def write_wings(surfaces):
+        # Loop through all surfaces and print those of type Vortex
+        for surface in surfaces:
+            if surface.type == "Vortex":
+                string = "WING " + str(surface.id)
+                # Run through all elements and add if it is part of surface
+                for wingstation_id in surface.wingstations:
+                    string += " " + str(wingstation_id)
+                string += "\n"
+                f.write(string)
 
     def write_patches(surfaces, elements):
         # Loop through all surfaces to print surfaces of type Doublet
@@ -289,11 +304,11 @@ def export_mesh(filename, mesh):
     write_vortexes(mesh.elements)
     print("Done writing vortex elements to file")
 
-    # write_wing_stations(column_table, surface_id, lift_table)
-    # print("Done writing wing stations to file")
+    write_wingstations(mesh.wingstations)
+    print("Done writing wing stations to file")
 
-    # write_lifting_surfaces(f, column_table, surface_id, lift_table)
-    # print("Done writing lifting surfaces to file")
+    write_wings(mesh.surfaces)
+    print("Done writing lifting surfaces to file")
 
     write_patches(mesh.surfaces, mesh.elements)
     print("Done writing patches to file")

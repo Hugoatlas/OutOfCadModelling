@@ -21,7 +21,19 @@ class Body:
             self.NC1 = nc1
             self.NC2 = nc2
 
-        def build_normalized_surface(self, eps, eta):
+        def flip(self):
+            self.C.reverse()
+            self.Z_TE.reverse()
+            self.R_LE.reverse()
+            self.BETA.reverse()
+            self.N1.reverse()
+            self.N2.reverse()
+            nc1 = self.NC2
+            nc2 = self.NC1
+            self.NC1 = nc1
+            self.NC2 = nc2
+
+        def build_surface(self, eps, eta, surface_id):
             def get_airfoil_profile(eps_list, zeta_t, shape_coefficients, class_coefficients, eta_class):
                 y = []
                 shape_function = bernstein_function(eps_list, shape_coefficients)
@@ -72,7 +84,7 @@ class Body:
 
                             # If COEFFICIENTS attribute is empty, use r_le and beta
                             if len(self.COEFFICIENTS) == 0:
-                                a = bernstein_coefficients(z_te[j], r_le[j], beta[j], c[j], 2, 0)
+                                a = [math.sqrt(2 * r_le[j] / c[j]), math.tan(beta[j]) + (z_te[j] / c[j])]
                             else:
                                 a = self.COEFFICIENTS
 
@@ -83,31 +95,97 @@ class Body:
                             s_i = append_to_np_array(s_i, s_ij)
                         x = append_to_np_array(x, x_i)
                         s = append_to_np_array(s, s_i)
+                # Flip s if surface is identified as Lower
+                if surface_id == "Lower":
+                    s = -s
                 return x, s
 
-        def flip(self):
-            self.C.reverse()
-            self.Z_TE.reverse()
-            self.R_LE.reverse()
-            self.BETA.reverse()
-            self.N1.reverse()
-            self.N2.reverse()
-            nc1 = self.NC2
-            nc2 = self.NC1
-            self.NC1 = nc1
-            self.NC2 = nc2
-
     class NACAAirfoil:
-        def __init__(self, m, p, t):
+        def __init__(self, c, m, p, t):
             self.type = "NACA"
+            self.C = list(c)
             self.M = list(m)
             self.P = list(p)
             self.T = list(t)
 
         def flip(self):
+            self.C.reverse()
             self.M.reverse()
             self.P.reverse()
             self.T.reverse()
+
+        def build_surface(self, eps, eta, surface_id):
+            def get_thickness(eps_val, t_val):
+                yt_val = 5 * t_val * (0.2969 * math.sqrt(eps_val) - 0.1260 * eps_val - 0.3516 * math.pow(eps_val, 2) +
+                                      0.2843 * math.pow(eps_val, 3) - 0.1015 * math.pow(eps_val, 4))
+                return yt_val
+
+            def get_camber(eps_val, m_val, p_val):
+                if 0 <= eps_val < p_val:
+                    print((m_val / math.pow(p_val, 2)) * (2 * p_val * eps_val - math.pow(eps_val, 2)))
+                    yc_val = (m_val / math.pow(p_val, 2)) * (2 * p_val * eps_val - math.pow(eps_val, 2))
+                elif p_val < eps_val <= 1:
+                    yc_val = (m_val / math.pow(1 - p_val, 2)) * \
+                             ((1 - 2 * p_val) + 2 * p_val * eps_val - math.pow(eps_val, 2))
+                else:
+                    yc_val = m_val
+                return yc_val
+
+            def get_theta(eps_val, m_val, p_val):
+                if 0 <= eps_val < p_val:
+                    dyc_dx = (2 * m_val / math.pow(p_val, 2)) * (p_val - eps_val)
+                elif p_val < eps_val <= 1:
+                    dyc_dx = (2 * m_val / math.pow(1 - p_val, 2)) * (p_val - eps_val)
+                else:
+                    dyc_dx = 0
+                theta_val = math.atan(dyc_dx)
+                return theta_val
+
+            # eps and eta are 2D numpy arrays
+            dim_eps = np.shape(eps)
+            dim_eta = np.shape(eta)
+
+            if dim_eps[0] == dim_eta[0]:
+                x = []
+                s = []
+
+                if len(dim_eps) == 1:
+                    num = 1
+                else:
+                    num = dim_eps[0]
+
+                for i in range(0, num):
+                    if len(dim_eps) == 1:
+                        eps_i = eps
+                        eta_i = eta
+                    else:
+                        eps_i = eps[i, :]
+                        eta_i = eta[i, :]
+
+                    c = bernstein_function(eta_i, self.C)
+                    m = bernstein_function(eta_i, self.M) / 100
+                    p = bernstein_function(eta_i, self.P) / 10
+                    t = bernstein_function(eta_i, self.T) / 100
+
+                    if len(eps_i) == len(eta_i):
+                        x_i = []
+                        s_i = []
+                        for j in range(0, len(eta_i)):
+                            eps_ij = eps_i[j]
+                            yc_ij = get_camber(eps_ij, m[j], p[j])
+                            theta_ij = get_theta(eps_ij, m[j], p[j])
+                            yt_ij = get_thickness(eps_ij, t[j])
+
+                            if surface_id == "Lower":
+                                yt_ij = - yt_ij
+                            x_ij = c[j] * (eps_ij - yt_ij * math.sin(theta_ij))
+                            s_ij = c[j] * (yc_ij + yt_ij * math.cos(theta_ij))
+
+                            x_i = append_to_np_array(x_i, x_ij)
+                            s_i = append_to_np_array(s_i, s_ij)
+                        x = append_to_np_array(x, x_i)
+                        s = append_to_np_array(s, s_i)
+                return x, s
 
     class Surface:
         def __init__(self, airfoil_data, nx, ny, b, d, c, x_le, z_n, delta_alpha_t, nc1, nc2, ny1, ny2, identification):
@@ -133,6 +211,7 @@ class Body:
             # Get adequate distributions
             self.x_distribution = "cartesian"
             self.y_distribution = "cartesian"
+            self.is_flipped = False
             self.eps = np.zeros(0)
             self.eta = np.zeros(0)
             # Set eps and eta distributions
@@ -158,9 +237,7 @@ class Body:
         def build_complete_surface(self, surface_type):
             eps = self.eps
             eta = self.eta
-            u, r = self.airfoil_data.build_normalized_surface(eps, eta)
-            if self.ID == "Lower":
-                r = -r
+            u, r = self.airfoil_data.build_surface(eps, eta, self.ID)
 
             dim_eps = np.shape(eps)
             x = []
@@ -279,6 +356,7 @@ class Body:
         self.type = body_type
         self.surfaces = []
         self.associativity = []
+        self.is_flipped = False
 
     def set_to_general_solid(self):
         self.type = "General"
@@ -292,7 +370,7 @@ class Body:
         self.surfaces.append(self.Surface(airfoil_data, nx, ny, b, d, c, x_le, z_n, delta_alpha_t, nc1, nc2, ny1, ny2, identification))
 
     def add_surface_naca(self, m, p, t, nx, ny, b, d, c, x_le, z_n, delta_alpha_t, nc1, nc2, ny1, ny2, identification):
-        airfoil_data = self.NACAAirfoil(m, p, t)
+        airfoil_data = self.NACAAirfoil(c, m, p, t)
         self.surfaces.append(self.Surface(airfoil_data, nx, ny, b, d, c, x_le, z_n, delta_alpha_t, nc1, nc2, ny1, ny2, identification))
 
     def add_wing_surface_cst(self, nx, ny, b, d, c, z_te_half, r_le, beta, x_le, z_n, delta_alpha_t):
@@ -334,6 +412,11 @@ class Body:
         self.add_surface_naca(m, p, t, nx, ny, b, d, c, x_le, z_n, delta_alpha_t, 0, 0, 0, 0, "Lower")
 
     def mirror_body(self):
+        if self.is_flipped:
+            self.is_flipped = False
+        else:
+            self.is_flipped = True
+
         for surface in self.surfaces:
             surface.flip_on_xz_plane()
 

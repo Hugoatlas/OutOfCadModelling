@@ -7,29 +7,310 @@ import cst_geometry as geo
 import export_to_gmsh as exp
 
 
+class PointObject:
+    def __init__(self, object_id, list_of_points):
+        self.id = object_id
+        self.points = list_of_points
+
+
 class Box:
-    def __init__(self, box_id, element_ids, mesh_object):
+    def __init__(self, box_id, list_of_points):
         self.id = box_id
-        self.min = [0, 0, 0]
-        self.max = [0, 0, 0]
-        self.boxes = []
-        self.elements = element_ids
-        self.mesh = mesh_object
+        self.points = list_of_points
+        self.min = [1e15, 1e15, 1e15]
+        self.max = [-1e15, -1e15, -1e15]
+        self.set_boundaries()
 
-    def get_box_limits(self):
-        for elem_id in self.elements:
-            pass
+    def set_boundaries(self):
+        for point in self.points:
+            # Set min
+            self.min[0] = min(self.min[0], point[0])
+            self.min[1] = min(self.min[1], point[1])
+            self.min[2] = min(self.min[2], point[2])
+            # Set max
+            self.max[0] = max(self.max[0], point[0])
+            self.max[1] = max(self.max[1], point[1])
+            self.max[2] = max(self.max[2], point[2])
+
+    def box_touches_box(self, box):
+        x_touches = False
+        y_touches = False
+        z_touches = False
+        if not (self.min[0] > box.max[0] or self.max[0] < box.min[0]):
+            x_touches = True
+        if not (self.min[1] > box.max[1] or self.max[1] < box.min[1]):
+            y_touches = True
+        if not (self.min[2] > box.max[2] or self.max[2] < box.min[2]):
+            z_touches = True
+
+        if x_touches and y_touches and z_touches:
+            touches = True
+        else:
+            touches = False
+        return touches
+
+    def is_box_inside_box(self, box):
+        is_inside = True
+        if self.min[0] == self.max[0] or self.min[1] == self.max[1] or self.min[2] == self.max[2]:
+            is_inside = False
+        else:
+            for point in box.points:
+                u = (point[0] - self.min[0]) / (self.max[0] - self.min[0])
+                v = (point[1] - self.min[1]) / (self.max[1] - self.min[1])
+                w = (point[2] - self.min[2]) / (self.max[2] - self.min[2])
+                if (1 >= u >= 0) and (1 >= v >= 0) and (1 >= w >= 0):
+                    pass
+                else:
+                    is_inside = False
+            # u1 = (box.min[0] - self.min[0]) / (self.max[0] - self.min[0])
+            # v1 = (box.min[1] - self.min[1]) / (self.max[1] - self.min[1])
+            # w1 = (box.min[2] - self.min[2]) / (self.max[2] - self.min[2])
+            # if (1 >= u1 >= 0) and (1 >= v1 >= 0) and (1 >= w1 >= 0):
+            #     pass
+            # else:
+            #     is_inside = False
+            # u2 = (box.max[0] - self.min[0]) / (self.max[0] - self.min[0])
+            # v2 = (box.max[1] - self.min[1]) / (self.max[1] - self.min[1])
+            # w2 = (box.max[2] - self.min[2]) / (self.max[2] - self.min[2])
+            # if (1 >= u2 >= 0) and (1 >= v2 >= 0) and (1 >= w2 >= 0):
+            #     pass
+            # else:
+            #     is_inside = False
+        return is_inside
+
+    def is_object_inside_box(self, point_object):
+        is_inside = True
+        if self.min[0] == self.max[0] or self.min[1] == self.max[1] or self.min[2] == self.max[2]:
+            is_inside = False
+        else:
+            for point in point_object.points:
+                u = (point[0] - self.min[0]) / (self.max[0] - self.min[0])
+                v = (point[1] - self.min[1]) / (self.max[1] - self.min[1])
+                w = (point[2] - self.min[2]) / (self.max[2] - self.min[2])
+                if (1 >= u >= 0) and (1 >= v >= 0) and (1 >= w >= 0):
+                    pass
+                else:
+                    is_inside = False
+                    break
+        return is_inside
 
 
-class Group:
-    def __init__(self, group_id, element_ids, mesh_object):
-        self.id = group_id
-        self.contains = element_ids
-        self.mesh = mesh_object
+class Container:
+    def __init__(self, list_of_boxes):
+        self.contains = []
+        self.box = Box(None, [])
+        self.subdivisions = []
+        self.nb_subdivisions = 0
+        self.set_container_boundaries(list_of_boxes)
 
-    def sort_elements(self, order, vertices):
-        # order is an integer
-        pass
+    def set_container_boundaries(self, list_of_boxes):
+        container_min = [1e15, 1e15, 1e15]
+        container_max = [-1e15, -1e15, -1e15]
+        for box in list_of_boxes:
+            for point in box.points:
+                # Set min
+                container_min[0] = min(container_min[0], point[0])
+                container_min[1] = min(container_min[1], point[1])
+                container_min[2] = min(container_min[2], point[2])
+                # Set max
+                container_max[0] = max(container_max[0], point[0])
+                container_max[1] = max(container_max[1], point[1])
+                container_max[2] = max(container_max[2], point[2])
+        self.box.points = [container_min, container_max]
+        self.box.set_boundaries()
+
+    def subdivide(self):
+        # Clear subdivisions
+        self.subdivisions.clear()
+        if self.nb_subdivisions == 0:
+            self.nb_subdivisions = 1
+
+        # Fill subdivisions back with the 8 boxes
+        d = [self.box.max[0] - self.box.min[0],
+             self.box.max[1] - self.box.min[1],
+             self.box.max[2] - self.box.min[2]]
+
+        ni = 1
+        nj = 1
+        nk = 1
+        if d[0] > d[1] and d[0] > d[2]:
+            ni = 2
+        elif d[1] > d[0] and d[1] > d[2]:
+            nj = 2
+        else:
+            nk = 2
+
+        # Divide d by values of ns
+        d_ijk = [d[0] / ni, d[1] / nj, d[2] / nk]
+
+        for i in range(0, ni):
+            for j in range(0, nj):
+                for k in range(0, nk):
+                    min_ijk = [self.box.min[0] + i * d_ijk[0],
+                               self.box.min[1] + j * d_ijk[1],
+                               self.box.min[2] + k * d_ijk[2]]
+                    max_ijk = [min_ijk[0] + d_ijk[0],
+                               min_ijk[1] + d_ijk[1],
+                               min_ijk[2] + d_ijk[2]]
+                    # Create new container object and add it to subdivisions list
+                    container_dimensions = [Box(None, [min_ijk, max_ijk])]
+                    self.subdivisions.append(Container(container_dimensions))
+
+    def place_box_in_container(self, box_object):
+        if self.box.is_box_inside_box(box_object):
+            self.contains.append(box_object)
+            return True
+        else:
+            return False
+
+    def place_boxes_in_subdivisions(self):
+        if len(self.subdivisions) > 0:
+            objects_to_remove = []
+            for i in range(0, len(self.contains)):
+                box_object = self.contains[i]
+                for container in self.subdivisions:
+                    if container.place_box_in_container(box_object):
+                        objects_to_remove.insert(0, i)
+                        break
+            # Clear the necessary items from the contains list
+            if len(objects_to_remove) > 0:
+                for object_id in objects_to_remove:
+                    self.contains.pop(object_id)
+
+    def is_container_empty(self):
+        # Return False if container contains at least one item
+        if len(self.contains) > 0:
+            return False
+        else:
+            for subdivision in self.subdivisions:
+                # As soon as a subdivision is found containing something, return False
+                if not subdivision.is_container_empty():
+                    return False
+            # If all subdivisions are empty, return True
+            return True
+
+
+def append_box_to_container(container, box_object):
+    if container.box.is_box_inside_box(box_object):
+        box_fits_in_subdivision = False
+        if len(container.subdivisions) > 0:
+            for subdivision in container.subdivisions:
+                box_fits_in_subdivision = append_box_to_container(subdivision, box_object)
+                if box_fits_in_subdivision:
+                    break
+        # If the object does not fit in any of the subdivisions, then it must be added to the current container
+        if not box_fits_in_subdivision:
+            container.contains.append(box_object)
+        # Return the value True to indicate that the object fits inside this container
+        return True
+    else:
+        # Return the value False to indicate that the object does not fit inside the container
+        return False
+
+
+def generate_containers(container, list_of_boxes, number_of_subdivisions):
+    list_of_boxes_copy = list_of_boxes.copy()
+    # If container is not previously defined, initialize one with the objects provided
+    if container is None:
+        container = Container(list_of_boxes)
+        # Do not forget to clear the objects from the container, as they will be added back later (but filtered)
+        container.nb_subdivisions = number_of_subdivisions
+
+    # Determine if container needs to be subdivided
+    subdivide = False
+    if number_of_subdivisions > 0:
+        subdivide = True
+
+    # Subdivide container if necessary
+    if subdivide and len(container.subdivisions) == 0:
+        container.subdivide()
+
+    if len(list_of_boxes) > 24 and len(container.subdivisions) > 0:
+        for subdivision in container.subdivisions:
+            # Get the objects fitting inside the subdivision
+            boxes_in_subdivision = []
+            boxes_to_remove_from_list = []
+            for i in range(0, len(list_of_boxes_copy)):
+                box_object = list_of_boxes_copy[i]
+                if subdivision.box.is_box_inside_box(box_object):
+                    boxes_in_subdivision.append(box_object)
+                    boxes_to_remove_from_list.insert(0, i)
+
+            # Clear the necessary items from the contains list
+            if len(boxes_to_remove_from_list) > 0:
+                for box_index in boxes_to_remove_from_list:
+                    list_of_boxes_copy.pop(box_index)
+
+            # Add objects to subdivision
+            generate_containers(subdivision, boxes_in_subdivision, number_of_subdivisions - 1)
+
+    # Place leftover objects in container
+    # (if the box was initialized from the object list, all objects will end up in a box)
+    for box_object in list_of_boxes_copy:
+        container.place_box_in_container(box_object)
+
+    # print(number_of_subdivisions, len(list_of_boxes_copy))
+    return container
+
+
+def set_mesh_elements_in_containers(mesh, max_subdivisions):
+    # Extract list of Box objects from mesh -> elements
+    elements = mesh.elements
+    list_of_elements = []
+    for i in range(0, len(elements)):
+        element = elements[i]
+        list_of_points = []
+        for vertex in element.vertices:
+            list_of_points.append(mesh.vertices[int(vertex)])
+        list_of_elements.append(Box(i, list_of_points))
+
+    # Create container structure
+    container = generate_containers(None, list_of_elements, max_subdivisions)
+    return container
+
+
+def get_collisions(container_1, container_2, collisions):
+    if container_1.box.box_touches_box(container_2.box):
+        # Then we need to check for all potential collisions in contains 1 and 2
+        for box_object_1 in container_1.contains:
+            for box_object_2 in container_2.contains:
+                if box_object_1.box_touches_box(box_object_2):
+                    # Then there is a potential collision
+                    collisions.append([box_object_1.id, box_object_2.id])
+
+        if len(container_1.contains) > 0:
+            for subdivision_2 in container_2.subdivisions:
+                if not subdivision_2.is_container_empty():
+                    collisions = get_collisions(container_1, subdivision_2, collisions)
+
+        for subdivision_1 in container_1.subdivisions:
+            if not subdivision_1.is_container_empty():
+                collisions = get_collisions(subdivision_1, container_2, collisions)
+
+    return collisions
+
+
+def get_potential_collisions(container, box_to_test, list_of_collisions):
+    add_box_to_container = False
+    if container.box.is_box_inside_box(box_to_test):
+        add_box_to_container = True
+
+    if container.box.box_touches_box(box_to_test):
+        for box_object in container.contains:
+            if box_to_test.box_touches_box(box_object):
+                list_of_collisions.append([box_to_test.id, box_object.id])
+
+        for subdivision in container.subdivisions:
+            if subdivision.box.box_touches_box(box_to_test):
+                list_of_collisions, add_box_to_subdivision = get_potential_collisions(subdivision, box_to_test,
+                                                                                      list_of_collisions)
+                if add_box_to_subdivision:
+                    add_box_to_container = False
+
+    if add_box_to_container:
+        container.contains.append(box_to_test)
+
+    return list_of_collisions, add_box_to_container
 
 
 class Mesh:
@@ -53,23 +334,26 @@ class Mesh:
             self.vertices = vertices
 
     class Wingstation:
-        def __init__(self, wingstation_id, elements):
+        def __init__(self, wingstation_id, surface, elements):
             self.id = wingstation_id
             self.elements = elements
+            self.surface = surface
 
     class Surface:
-        def __init__(self, surface_id, surface_type, element_count):
+        def __init__(self, surface_id, surface_type):
             # Two surfaces can have the same ID if they do not have the same type
             self.id = surface_id
             self.type = surface_type
-            self.element_count = element_count
+            self.wingstations = []
 
     def __init__(self):
         self.vertices = []
         self.elements = []
+        self.wingstations = []
         self.surfaces = []
         self.vortex_count = 0
         self.doublet_count = 0
+        self.wingstation_count = 0
         self.surface_count = 0
 
     def append_vertex(self, vertex):
@@ -98,9 +382,33 @@ class Mesh:
         else:
             print("ERROR - Incorrect Element Format")
 
+    def create_new_surface(self, surface_type):
+        new_surface_id = self.surface_count
+        new_surface = self.Surface(new_surface_id, surface_type)
+        self.surfaces.append(new_surface)
+        self.surface_count += 1
+
+    def create_new_wingstation(self, surface_id, vortexes):
+        new_wingstation_id = self.wingstation_count
+        new_wingstation = self.Wingstation(new_wingstation_id, surface_id, vortexes)
+        self.wingstations.append(new_wingstation)
+        self.wingstation_count += 1
+        self.surfaces[surface_id].wingstations.append(new_wingstation_id)
+
+    def append_vortex_to_wingstation(self, vortex, wingstation_id):
+        self.wingstations[wingstation_id].elements.append(vortex.id)
+
     def create_vortex(self, vertices, surface, station, row):
         new_vortex = self.Vortex(vertices, surface, station, row)
         self.append_element(new_vortex)
+        if self.wingstation_count > station:
+            if self.wingstations[station].surface == surface:
+                self.wingstations[station].elements.append(new_vortex.id)
+            else:
+                print("Error - Wingstation is not on specified surface")
+        else:
+            print("Error - Wingstation does not yet exist")
+            print(station)
 
     def create_doublet(self, vertices, surface):
         new_doublet = self.Doublet(vertices, surface)
@@ -158,30 +466,113 @@ class Mesh:
                 unused_vertices.append(i)
         return unused_vertices
 
-    # def delete_unused_vertices(self):
-    #     vertices_usage = np.zeros([len(self.vertices), 1])
+    def get_transmute_vertices(self):
+        unused_vertices = self.get_unused_vertices()
+        vertex_number = len(self.vertices)
+        transmute_vertex_to = list(range(0, vertex_number))
+        for i in range(0, vertex_number):
+            for unused_vertex in unused_vertices:
+                if unused_vertex <= i:
+                    transmute_vertex_to[i] += -1
+        return transmute_vertex_to
+
+    def delete_unused_vertices(self):
+        unused_vertices = self.get_unused_vertices()
+        transmute_vertex_to = self.get_transmute_vertices()
+        vertex_count = len(self.vertices)
+
+        # re-index vertices to avoid gaps in ordering
+        new_vertices_index = list(range(0, vertex_count))
+        current_index = -1
+        dummy_transmute_list = transmute_vertex_to.copy()
+        keep_vertices_list = []
+        for i in range(0, vertex_count):
+            try:
+                # Try statement, possibility to fail
+                dummy_transmute_list.remove(i)
+                # Operations to complete if try statement is successful
+                keep_vertices_list.append(i)
+                current_index += 1
+            except ValueError:
+                pass
+            new_vertices_index[i] = current_index
+
+        # Remove transmuted elements from vertex_table
+        for i in range(0, len(unused_vertices)):
+            self.vertices.pop(unused_vertices[len(unused_vertices) - 1 - i])
+
+        # Transmute vertices in elem_table
+        dim = len(self.elements)
+        for i in range(0, dim):
+            for j in range(0, len(self.elements[i].vertices)):
+                self.elements[i].vertices[j] = transmute_vertex_to[int(self.elements[i].vertices[j])]
+
+    def convert_used_vertices_to_box_list(self, tol):
+        list_of_boxes = []
+        for i in range(0, len(self.elements)):
+            for j in range(0, len(self.elements[i].vertices)):
+                vertex_id = int(self.elements[i].vertices[j])
+                point = self.vertices[vertex_id]
+                if tol > 0:
+                    point_min = [point[0] - tol, point[1] - tol, point[2] - tol]
+                    point_max = [point[0] + tol, point[1] + tol, point[2] + tol]
+                    list_of_points = [point_min, point_max]
+                else:
+                    list_of_points = [point]
+                list_of_boxes.append(Box([vertex_id, [i, j]], list_of_points))
+        return list_of_boxes
+
+    def set_used_vertices_in_containers(self, max_subdivisions, tol):
+        # Extract list of PointObjects from mesh -> elements
+        list_of_boxes = self.convert_used_vertices_to_box_list(tol)
+        # Create container structure
+        container = generate_containers(None, list_of_boxes, max_subdivisions)
+        return container
+
+    def stitch_used_vertices(self, tol, nb_subdivisions):
+        # Get container of used vertices
+        print(" Step 1")
+        container_1 = self.set_used_vertices_in_containers(nb_subdivisions, 2 * tol)
+        container_2 = self.set_used_vertices_in_containers(nb_subdivisions, 2 * tol)
+
+        print(" Step 2")
+        list_of_collisions = get_collisions(container_1, container_2, [])
+
+        tol_square = tol ** 2
+        print(len(list_of_collisions))
+        for collision in list_of_collisions:
+            ids_1 = collision[1]
+            ids_2 = collision[0]
+            address_1 = self.vertices[ids_1[0]]
+            address_2 = self.vertices[ids_2[0]]
+            vertex_1 = self.vertices[int(address_1)]
+            vertex_2 = self.vertices[int(address_2)]
+
+            distance_square = (vertex_1[0] - vertex_2[0]) ** 2 + \
+                              (vertex_1[1] - vertex_2[1]) ** 2 + (vertex_1[2] - vertex_2[2]) ** 2
+            # If vertices are the same, set vertex_address_2 equal to vertex_address_1
+            if distance_square <= tol_square:
+                # ids_i contains [vertex_id, [element_id, element_vertex]]
+                self.elements[ids_1[1][0]].vertices[ids_1[1][1]] = ids_2
+
+    # def update_surfaces(self):
+    #     # Re-initialize element count in mesh surfaces
+    #     for surface in self.surfaces:
+    #         surface.element_count = 0
+    #
     #     for element in self.elements:
-    #         for vertex in element.vertices:
-    #             vertices_usage[int(vertex)] += 1
-
-    def update_surfaces(self):
-        # Re-initialize element count in mesh surfaces
-        for surface in self.surfaces:
-            surface.element_count = 0
-
-        for element in self.elements:
-            is_new_surface = True
-            for surface in self.surfaces:
-                if element.surface == surface.id and element.type == surface.type:
-                    surface.element_count += 1
-                    # Then surface is already initialized, break out of for loop
-                    is_new_surface = False
-                    break
-
-            if is_new_surface:
-                # Create new surface in mesh and initialize element count to 1
-                self.surfaces.append(Mesh.Surface(element.surface, element.type, 1))
-                self.surface_count += 1
+    #         is_new_surface = True
+    #         for surface in self.surfaces:
+    #             if element.surface == surface.id and element.type == surface.type:
+    #                 surface.element_count += 1
+    #                 # Then surface is already initialized, break out of for loop
+    #                 is_new_surface = False
+    #                 break
+    #
+    #         if is_new_surface:
+    #             # Create new surface in mesh and initialize element count to 1
+    #             self.surfaces.append(Mesh.Surface(element.surface, element.type, 1))
+    #             self.surface_count += 1
 
 
 def convert_doublet_to_mesh_object(mesh, vertex_table, element_table, surface):
@@ -812,6 +1203,44 @@ def get_repeated_elements(vertex_table):
     return transmute_vertex_to
 
 
+def transmute_vertices_mesh(transmute_vertex_to, mesh):
+    vertex_table = mesh.vertices
+    vertex_number = np.shape(vertex_table)[0]
+
+    # re-index vertices to avoid gaps in ordering
+    new_vertices_index = list(range(0, vertex_number))
+    current_index = -1
+    dummy_transmute_list = transmute_vertex_to.copy()
+    keep_vertices_list = []
+    for i in range(0, vertex_number):
+        try:
+            # Try statement, possibility to fail
+            dummy_transmute_list.remove(i)
+            # Operations to complete if try statement is successful
+            keep_vertices_list.append(i)
+            current_index += 1
+        except ValueError:
+            pass
+        new_vertices_index[i] = current_index
+
+    # Remove transmuted elements from vertex_table
+    new_vertex_table = np.zeros([len(keep_vertices_list), np.shape(vertex_table)[1]])
+    for i in range(0, len(keep_vertices_list)):
+        new_vertex_table[i, :] = vertex_table[keep_vertices_list[i], :]
+
+    # Update the transmutation vertex list with new vertices index
+    for i in range(0, len(transmute_vertex_to)):
+        transmute_vertex_to[i] = new_vertices_index[transmute_vertex_to[i]]
+
+    # Transmute vertices in elem_table
+    dim = mesh.doublet_count + mesh.vortex_count
+    for i in range(0, dim):
+        for j in range(0, 3):
+            mesh.elements[i].vertices[j] = transmute_vertex_to[int(mesh.elements[i].vertices[j])]
+
+    return mesh
+
+
 def transmute_vertices(transmute_vertex_to, elem_table, vertex_table):
     vertex_number = np.shape(vertex_table)[0]
 
@@ -1241,17 +1670,6 @@ def combine_meshes(mesh1, mesh2, mode):
     return intersection_list_1, intersection_list_2, mesh1, mesh2, permuted_1, permuted_2
 
 
-def refine_mesh(param, vertex_table, elem_table, norm_table, lift_table, refine_info):
-    def clear_elem(elem_id):
-        np.delete(elem_table, elem_id, axis=1)
-        np.delete(norm_table, elem_id, axis=1)
-        np.delete(lift_table, elem_id, axis=1)
-
-    def split_triangle(elem_id):
-
-        clear_elem(elem_id)
-
-
 def get_surface_mesh_tables_v2(body, mesh, mode, is_vortex):
     def get_triangle_area_square(vertices):
         point_a = np.array(mesh.vertices[int(vertices[0])])
@@ -1260,14 +1678,6 @@ def get_surface_mesh_tables_v2(body, mesh, mode, is_vortex):
         n = cross_product(point_b - point_a, point_c - point_a)
         area_square = (n[0] ** 2 + n[1] ** 2 + n[2] ** 2) / 4
         return area_square
-
-    def mesh_rectangle(vertices):
-        if np.shape(vertices) == (2, 2):
-            rectangle = [vertices[0, 0], vertices[0, 1], vertices[1, 1], vertices[1, 0]]
-            if is_vortex:
-                pass
-            else:
-                mesh.create_doublet(rectangle, surface_id)
 
     def mesh_rectangle_to_triangles(vertices):
         if np.shape(vertices) == (2, 2):
@@ -1289,21 +1699,28 @@ def get_surface_mesh_tables_v2(body, mesh, mode, is_vortex):
             # Choose the best arrangement, currently based on triangles area
             if area_min_1 < area_min_2:
                 # Arrangement 2 is superior
-                mesh.create_doublet(triangle_2a, surface_id)
-                mesh.create_doublet(triangle_2b, surface_id)
+                if len(np.unique(triangle_2a)) == 3:
+                    mesh.create_doublet(triangle_2a, surface_id)
+                if len(np.unique(triangle_2b)) == 3:
+                    mesh.create_doublet(triangle_2b, surface_id)
             else:
                 # Arrangement 1 is superior
-                mesh.create_doublet(triangle_1a, surface_id)
-                mesh.create_doublet(triangle_1b, surface_id)
+                if len(np.unique(triangle_1a)) == 3:
+                    mesh.create_doublet(triangle_1a, surface_id)
+                if len(np.unique(triangle_1b)) == 3:
+                    mesh.create_doublet(triangle_1b, surface_id)
 
-    def mesh_grid(vertex_addressing, clockwise, verify_vertices):
+    def mesh_grid(vertex_addressing, grid_offset, clockwise, verify_vertices):
         shape = np.shape(vertex_addressing)
+        station_count = 0
         for i in range(0, shape[0] - 1):
+            row_count = 0
+            wingstation_is_initialized = False
             for j in range(0, shape[1] - 1):
                 do_mesh = True
                 vertices = vertex_addressing[i:i + 2, j:j + 2]
                 # Transpose vertices to reverse the order of vertices if not clockwise
-                if not clockwise:
+                if clockwise:
                     vertices = vertices.transpose()
 
                 # If specified, make sure the vertices are valid (more than 2 unique vertices)
@@ -1313,7 +1730,29 @@ def get_surface_mesh_tables_v2(body, mesh, mode, is_vortex):
 
                 if do_mesh:
                     if mode == "Structured":
-                        mesh_rectangle(vertices)
+                        rectangle = [vertices[0, 0], vertices[0, 1], vertices[1, 1], vertices[1, 0]]
+                        # Make sure vortexes are not added if they do not have more than 3 distinct nodes
+
+                        if is_vortex:
+                            if len(np.unique(rectangle)) == 3:
+                                pass
+                            else:
+                                # Add to row count
+                                row_count += 1
+
+                                # On the last pass, initiate new wingstation
+                                if not wingstation_is_initialized:
+                                    mesh.create_new_wingstation(surface_id, [])
+                                    wingstation_is_initialized = True
+                                    # Add to station count
+                                    station_count += 1
+
+                                station = station_count - 1 + grid_offset[0]
+                                row = row_count - 1 + grid_offset[1]
+                                mesh.create_vortex(rectangle, surface_id, station, row)
+
+                        else:
+                            mesh.create_doublet(rectangle, surface_id)
                     else:
                         mesh_rectangle_to_triangles(vertices)
 
@@ -1349,84 +1788,175 @@ def get_surface_mesh_tables_v2(body, mesh, mode, is_vortex):
                             vertex_addressing_1[i1, j1] = address_2
         return vertex_addressing_1
 
+    def convert_addressing_to_box_list(vertex_addressing, addressing_id, tol):
+        shape = np.shape(vertex_addressing)
+        list_of_boxes = []
+        for i in range(0, shape[0]):
+            for j in range(0, shape[1]):
+                vertex = int(vertex_addressing[i, j])
+                point = mesh.vertices[vertex]
+                if tol > 0:
+                    point_min = [point[0] - tol, point[1] - tol, point[2] - tol]
+                    point_max = [point[0] + tol, point[1] + tol, point[2] + tol]
+                    list_of_points = [point_min, point_max]
+                else:
+                    list_of_points = [point]
+                list_of_boxes.append(Box([addressing_id, [i, j]], list_of_points))
+        return list_of_boxes
+
+    def set_addressing_in_containers(vertex_addressing, addressing_id, max_subdivisions, tol):
+        # Extract list of PointObjects from mesh -> elements
+        list_of_boxes = convert_addressing_to_box_list(vertex_addressing, addressing_id, tol=tol)
+        # Create container structure
+        container = generate_containers(None, list_of_boxes, max_subdivisions)
+        return container
+
+    def stitch_addressing_v1(vertex_addressing_1, vertex_addressing_2, tol, nb_subdivisions):
+        # Get container of vertex_addressing_1
+        print(" Step 1")
+        container_1 = set_addressing_in_containers(vertex_addressing_1, 1, nb_subdivisions, 2 * tol)
+        container_2 = set_addressing_in_containers(vertex_addressing_2, 2, nb_subdivisions, 2 * tol)
+
+        print(" Step 2")
+        list_of_collisions = get_collisions(container_1, container_2, [])
+
+        tol_square = tol ** 2
+        for collision in list_of_collisions:
+            ids_1 = collision[1][1]
+            ids_2 = collision[0][1]
+            address_1 = vertex_addressing_1[ids_1[0], ids_1[1]]
+            address_2 = vertex_addressing_2[ids_2[0], ids_2[1]]
+            vertex_1 = mesh.vertices[int(address_1)]
+            vertex_2 = mesh.vertices[int(address_2)]
+
+            distance_square = (vertex_1[0] - vertex_2[0]) ** 2 + \
+                              (vertex_1[1] - vertex_2[1]) ** 2 + (vertex_1[2] - vertex_2[2]) ** 2
+            # If vertices are the same, set vertex_address_2 equal to vertex_address_1
+            if distance_square <= tol_square:
+                vertex_addressing_1[ids_1[0], ids_1[1]] = address_2
+        return vertex_addressing_1
+
+    def stitch_addressing_with_mesh(vertex_addressing, tol, nb_subdivisions):
+        # Get container of vertex_addressing_1
+        print(" Step 1")
+        addr_container = set_addressing_in_containers(vertex_addressing, 5, nb_subdivisions, 2 * tol)
+        mesh_container = mesh.set_used_vertices_in_containers(nb_subdivisions, 2 * tol)
+
+        print(" Step 2")
+        list_of_collisions = get_collisions(addr_container, mesh_container, [])
+
+        tol_square = tol ** 2
+        for collision in list_of_collisions:
+            addr_ids = collision[0][1]
+            mesh_ids = collision[1][0]
+            addr_vertex_id = vertex_addressing[addr_ids[0], addr_ids[1]]
+            mesh_vertex_id = mesh_ids
+            addr_vertex = mesh.vertices[int(addr_vertex_id)]
+            mesh_vertex = mesh.vertices[int(mesh_vertex_id)]
+
+            distance_square = (addr_vertex[0] - mesh_vertex[0]) ** 2 + \
+                              (addr_vertex[1] - mesh_vertex[1]) ** 2 + (addr_vertex[2] - mesh_vertex[2]) ** 2
+            # If vertices are the same, set vertex_address_2 equal to vertex_address_1
+            if distance_square <= tol_square:
+                vertex_addressing[addr_ids[0], addr_ids[1]] = mesh_vertex_id
+        return vertex_addressing
+
     distance_tol = 1e-14
     # Initiate Mesh object if not already provided
     if mesh is None:
         mesh = Mesh()
-        surface_id = 0
+
+    if is_vortex:
+        surface_type = "Vortex"
     else:
-        # New surface ID ***
-        surface_id = 0
+        surface_type = "Doublet"
+    mesh.create_new_surface(surface_type)
+    surface_id = mesh.surfaces[len(mesh.surfaces) - 1].id
 
     # Get body surfaces
     surfaces = body.get_body_surfaces()
     associativity = body.associativity
-
     vertex_addressing_list = []
-    for surface in surfaces:
-        # Get basic addressing of surface
-        surface_addressing = get_vertices_address(surface[0], surface[1], surface[2])
+    nb = 20
 
-        # Stitch addressing of surface with itself
-        stitched_surface_addressing = stitch_addressing(surface_addressing, surface_addressing, distance_tol)
+    if is_vortex:
+        for stitch in associativity:
+            id_1 = stitch[1][0]
+            id_2 = stitch[1][1]
+            if stitch[0] == "su_sl":
+                surface_x = (surfaces[id_1][0] + surfaces[id_2][0]) / 2
+                surface_y = (surfaces[id_1][1] + surfaces[id_2][1]) / 2
+                surface_z = (surfaces[id_1][2] + surfaces[id_2][2]) / 2
 
-        vertex_addressing_list.append(stitched_surface_addressing)
+                surface_addressing = get_vertices_address(surface_x, surface_y, surface_z)
+                vertex_addressing_list.append(surface_addressing)
 
-    for stitch in associativity:
-        id_1 = stitch[1][0]
-        id_2 = stitch[1][1]
-        if stitch[0] == "su_sl":
-            updated_vertex_addressing = stitch_addressing(vertex_addressing_list[id_1],
-                                                          vertex_addressing_list[id_2], distance_tol)
-            vertex_addressing_list[id_1] = updated_vertex_addressing
+        # Stitch every surface together to correct for repeated vertices
+        for ik in range(0, len(vertex_addressing_list)):
+            vertex_addressing_list[ik] = stitch_addressing_with_mesh(vertex_addressing_list[ik], distance_tol, nb)
+            for jk in range(ik + 1, len(vertex_addressing_list)):
+                # vertex_addressing_list[ik] = stitch_addressing(vertex_addressing_list[ik],
+                #                                                vertex_addressing_list[jk], distance_tol)
+                vertex_addressing_list[ik] = stitch_addressing_v1(vertex_addressing_list[ik],
+                                                                  vertex_addressing_list[jk], distance_tol, nb)
 
-    # for vertex_addressing_array in vertex_addressing_list:
-    for k in range(0, len(vertex_addressing_list)):
-        vertex_addressing_array = vertex_addressing_list[k]
-        order_vertices_clockwise = True
-        if body.surfaces[k].ID == "Lower":
-            order_vertices_clockwise = False
-        mesh_grid(vertex_addressing_array, clockwise=order_vertices_clockwise, verify_vertices=True)
+        # for vertex_addressing_array in vertex_addressing_list:
+        current_offset = [mesh.wingstation_count, 0]
+        for k in range(0, len(vertex_addressing_list)):
+            mesh_grid(vertex_addressing_list[k], current_offset, clockwise=True, verify_vertices=True)
+            # Update current grid offset. For now, it is as simple as the sum of previous grids shape[1] values in list
+            current_offset[0] += np.shape(vertex_addressing_list[k])[0] - 1
 
-    for stitch in associativity:
-        id_1 = stitch[1][0]
-        id_2 = stitch[1][1]
-        stitch_shape_1 = np.shape(vertex_addressing_list[id_1])
-        stitch_shape_2 = np.shape(vertex_addressing_list[id_2])
+        # Flip wingstations order if body built is marked as flipped
+        if body.is_flipped:
+            mesh.surfaces[surface_id].wingstations.reverse()
 
-        if stitch[0] == "neighbour_PX":
-            if stitch_shape_1[0] == stitch_shape_2[0]:
-                stitch_vertices = np.vstack([vertex_addressing_list[id_1][stitch_shape_1[0], :],
-                                             vertex_addressing_list[id_2][0, :]])
-                mesh_grid(stitch_vertices, clockwise=True, verify_vertices=True)
-            else:
-                print("Error - Edges to stitch do not match in length")
+    else:
+        for surface in surfaces:
+            # Get basic addressing of surface
+            surface_addressing = get_vertices_address(surface[0], surface[1], surface[2])
+            vertex_addressing_list.append(surface_addressing)
 
-        elif stitch[0] == "neighbour_MX":
-            if stitch_shape_1[0] == stitch_shape_2[0]:
-                stitch_vertices = np.vstack([vertex_addressing_list[id_1][0, :],
-                                             vertex_addressing_list[id_2][stitch_shape_2[0], :]])
-                mesh_grid(stitch_vertices, clockwise=True, verify_vertices=True)
-            else:
-                print("Error - Edges to stitch do not match in length")
+        # Stitch every surface together to correct for repeated vertices
+        for ik in range(0, len(vertex_addressing_list)):
+            vertex_addressing_list[ik] = stitch_addressing_with_mesh(vertex_addressing_list[ik], distance_tol, nb)
+            for jk in range(ik + 1, len(vertex_addressing_list)):
+                print(ik, jk)
+                # vertex_addressing_list[ik] = stitch_addressing(vertex_addressing_list[ik],
+                #                                                vertex_addressing_list[jk], distance_tol)
+                vertex_addressing_list[ik] = stitch_addressing_v1(vertex_addressing_list[ik],
+                                                                  vertex_addressing_list[jk], distance_tol, nb)
 
-        elif stitch[0] == "neighbour_PY":
-            if stitch_shape_1[0] == stitch_shape_2[0]:
-                stitch_vertices = np.vstack([vertex_addressing_list[id_1][:, stitch_shape_1[1]],
-                                             vertex_addressing_list[id_2][:, 0]])
-                mesh_grid(stitch_vertices, clockwise=True, verify_vertices=True)
-            else:
-                print("Error - Edges to stitch do not match in length")
+        for stitch in associativity:
+            if stitch[0] == "su_sl":
+                su_addressing = vertex_addressing_list[stitch[1][0]]
+                sl_addressing = vertex_addressing_list[stitch[1][1]]
 
-        elif stitch[0] == "neighbour_MY":
-            if stitch_shape_1[0] == stitch_shape_2[0]:
-                stitch_vertices = np.vstack([vertex_addressing_list[id_1][:, 0],
-                                             vertex_addressing_list[id_2][:, stitch_shape_2[1]]])
-                mesh_grid(stitch_vertices, clockwise=True, verify_vertices=True)
-            else:
-                print("Error - Edges to stitch do not match in length")
+                su_shape = np.shape(su_addressing)
+                sl_shape = np.shape(sl_addressing)
+                if su_shape[0] == sl_shape[0] and su_shape[1] == sl_shape[1]:
+                    stitch_vertices = np.vstack([su_addressing[0, :], sl_addressing[0, :]])
+                    mesh_grid(stitch_vertices, [], clockwise=True, verify_vertices=True)
 
-    mesh.update_surfaces()
+                    stitch_vertices = np.vstack([su_addressing[su_shape[0] - 1, :], sl_addressing[sl_shape[0] - 1, :]])
+                    mesh_grid(stitch_vertices, [], clockwise=True, verify_vertices=True)
+
+                    stitch_vertices = np.vstack([su_addressing[:, 0], sl_addressing[:, 0]])
+                    mesh_grid(stitch_vertices, [], clockwise=True, verify_vertices=True)
+
+                    stitch_vertices = np.vstack([su_addressing[:, su_shape[1] - 1], sl_addressing[:, sl_shape[1] - 1]])
+                    mesh_grid(stitch_vertices, [], clockwise=True, verify_vertices=True)
+                else:
+                    print("Error - Su and Sl edges do not match in length")
+
+        # for vertex_addressing_array in vertex_addressing_list:
+        for k in range(0, len(vertex_addressing_list)):
+            vertex_addressing_array = vertex_addressing_list[k]
+            order_vertices_clockwise = True
+            if body.surfaces[k].ID == "Lower":
+                order_vertices_clockwise = False
+            mesh_grid(vertex_addressing_array, [], clockwise=order_vertices_clockwise, verify_vertices=True)
+
     return mesh
 
 

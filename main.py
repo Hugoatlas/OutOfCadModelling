@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import math
+import time
 
 import vlm_mesh as vlm
 import cst_geometry as geo
@@ -8,32 +9,38 @@ import export_to_dat as exp
 from cst_geometry import Body
 
 WING_RIGHT = Body(body_type="General")
-WING_RIGHT.add_wing_surface_cst(nx=20, ny=10, b=10, d=0,
-                                c=[1.2, 0.7, 0.35, 0.3, 0.25],
-                                z_te_half=[0.001],
-                                r_le=[0.05, 0.05, 0.01],
-                                beta=[0.4, 0.1],
-                                x_le=[0, 2], z_n=[0.05, 0.1, 0.4], delta_alpha_t=[0.05, 0.2])
-WING_RIGHT.add_wing_surface_cst(nx=20, ny=2, b=0.1, d=10,
-                                c=[0.25],
-                                z_te_half=[0.001],
-                                r_le=[0.01],
-                                beta=[0.1],
-                                x_le=[2, 2.02], z_n=[0.4, 0.5], delta_alpha_t=[0.2])
+# WING_RIGHT.add_wing_surface_cst(nx=100, ny=50, b=10, d=0,
+#                                 c=[1.2, 0.7, 0.35, 0.3, 0.25],
+#                                 z_te_half=[0.001],
+#                                 r_le=[0.05, 0.05, 0.01],
+#                                 beta=[0.4, 0.1],
+#                                 x_le=[0, 2], z_n=[0.05, 0.1, 0.4], delta_alpha_t=[0.05, 0.2])
+# WING_RIGHT.add_wing_surface_cst(nx=100, ny=2, b=0.1, d=10,
+#                                 c=[0.25],
+#                                 z_te_half=[0.001],
+#                                 r_le=[0.01],
+#                                 beta=[0.1],
+#                                 x_le=[2, 2.02], z_n=[0.4, 0.5], delta_alpha_t=[0.2])
+WING_RIGHT.add_wing_surface_naca(m=[0], p=[0], t=[12],
+                                 nx=13, ny=51, b=32, d=0, c=[1],
+                                 x_le=[0], z_n=[0], delta_alpha_t=[0])
 
 WING_LEFT = Body(body_type="General")
-WING_LEFT.add_wing_surface_cst(nx=20, ny=10, b=10, d=0,
-                               c=[1.2, 0.7, 0.35, 0.3, 0.25],
-                               z_te_half=[0.001],
-                               r_le=[0.05, 0.05, 0.01],
-                               beta=[0.4, 0.1],
-                               x_le=[0, 2], z_n=[0.05, 0.1, 0.4], delta_alpha_t=[0.05, 0.2])
-WING_LEFT.add_wing_surface_cst(nx=20, ny=2, b=0.1, d=10,
-                               c=[0.25],
-                               z_te_half=[0.001],
-                               r_le=[0.01],
-                               beta=[0.1],
-                               x_le=[2, 2.02], z_n=[0.4, 0.5], delta_alpha_t=[0.2])
+# WING_LEFT.add_wing_surface_cst(nx=100, ny=50, b=10, d=0,
+#                                c=[1.2, 0.7, 0.35, 0.3, 0.25],
+#                                z_te_half=[0.001],
+#                                r_le=[0.05, 0.05, 0.01],
+#                                beta=[0.4, 0.1],
+#                                x_le=[0, 2], z_n=[0.05, 0.1, 0.4], delta_alpha_t=[0.05, 0.2])
+# WING_LEFT.add_wing_surface_cst(nx=100, ny=2, b=0.1, d=10,
+#                                c=[0.25],
+#                                z_te_half=[0.001],
+#                                r_le=[0.01],
+#                                beta=[0.1],
+#                                x_le=[2, 2.02], z_n=[0.4, 0.5], delta_alpha_t=[0.2])
+WING_LEFT.add_wing_surface_naca(m=[0], p=[0], t=[12],
+                                nx=13, ny=51, b=32, d=0, c=[1],
+                                x_le=[0], z_n=[0], delta_alpha_t=[0])
 WING_LEFT.mirror_body()
 
 BODY = Body(body_type="General")
@@ -46,16 +53,16 @@ BODY.add_general_surface_cst(nx=20, ny=20, b=1.5, d=-.75, c=[6],
 BODY.change_all_distributions("sphere", "rounded")
 
 BALL = Body(body_type="General")
-BALL.add_general_surface_cst(nx=15, ny=15, b=4, d=0, c=[0.5],
+BALL.add_general_surface_cst(nx=4, ny=5, b=4, d=0, c=[0.5],
                              z_te_u=[0.0], z_te_l=[0.0],
                              coefficients_u=[2],
                              coefficients_l=[2],
                              x_le=[0], z_n=[0.5], delta_alpha_t=[0.0],
-                             n1=[0.0], n2=[0.0], nc1=0.0, nc2=0.0, ny1=0.5, ny2=0.5)
+                             n1=[0.5], n2=[0.5], nc1=0.5, nc2=0.5, ny1=0.5, ny2=0.5)
 BALL.change_all_distributions("distribute", "cartesian")
 
 REV = Body(body_type="Revolution")
-REV.add_general_surface_cst(nx=10, ny=10, b=1, d=0, c=[1],
+REV.add_general_surface_cst(nx=4, ny=5, b=1, d=0, c=[1],
                             z_te_u=[0.0], z_te_l=[0.0],
                             coefficients_u=[1.0, 0.7],
                             coefficients_l=[1.0, -0.7],
@@ -69,43 +76,60 @@ BALL_REV.add_surface_cst(nx=21, ny=11, b=0.25, d=0, c=[4],
                          x_le=[0.0], z_n=[0.0], delta_alpha_t=[0.0],
                          n1=[0.5], n2=[0.5], nc1=0, nc2=0, ny1=0, ny2=0, identification="Upper")
 
-S1 = WING_RIGHT.get_paired_body_surfaces()
-X1 = S1[0][0]
-Y1 = S1[0][2]
-Su1 = S1[0][4]
-Sl1 = S1[0][5]
+print("Start mesh")
+start_time = time.time()
+mesh_W = vlm.get_surface_mesh_tables_v2(WING_RIGHT, mesh=None, mode="Structured", is_vortex=True)
+mesh_W = vlm.get_surface_mesh_tables_v2(WING_LEFT, mesh=mesh_W, mode="Structured", is_vortex=True)
+# mesh_W = vlm.get_surface_mesh_tables_v2(BODY, mesh=mesh_W, mode="Structured", is_vortex=False)
+print("--- %s seconds ---" % (time.time() - start_time))
+print("Done mesh")
+print(mesh_W.get_unused_vertices())
 
-S2 = WING_LEFT.get_paired_body_surfaces()
-X2 = S2[0][0]
-Y2 = S2[0][2]
-Su2 = S2[0][4]
-Sl2 = S2[0][5]
+mesh_W.delete_unused_vertices()
+print(mesh_W.get_unused_vertices())
+exp.export_mesh("pazzy_wing_vlm.dat", mesh_W)
+W_ax = vlm.print_mesh_as_polygons(None, mesh_W, color_1=[0.8, 0.8, 1.0], color_2=[0.2, 0.2, 0.25], alpha=1.0, line=0.1)
 
-S3 = BODY.get_paired_body_surfaces()
-X3 = S3[0][0]
-Y3 = S3[0][2]
-Su3 = S3[0][4]
-Sl3 = S3[0][5]
+# W_ax = vlm.print_mesh_as_polygons(None, mesh_W, color_1=[0.8, 0.8, 1.0], color_2=[0.2, 0.2, 0.25], alpha=1.0, line=0.1)
+# plt.gca().set_aspect('equal', adjustable='box')
 
-SB = BALL.get_paired_body_surfaces()
-XB = SB[0][0]
-YB = SB[0][2]
-SuB = SB[0][4]
-SlB = SB[0][5]
+# print("Start to arrange in container")
+# container_W = vlm.set_mesh_elements_in_containers(mesh_W, max_subdivisions=4)
+# print("Done arranging in container")
 
-SR = REV.get_paired_body_surfaces()
+# mesh_REV = vlm.get_surface_mesh_tables_v2(BALL, mesh=None, mode="Structured", is_vortex=False)
+# mesh_REV.delete_unused_vertices()
+# print(mesh_REV.get_unused_vertices())
+# REV_ax = vlm.print_mesh_as_polygons(None, mesh_REV, color_1=[0.8, 0.8, 1.0], color_2=[0.2, 0.2, 0.25], alpha=1.0, line=0.1)
+# exp.export_mesh("mesh_revolution.dat", mesh_REV)
 
-mesh_WR = vlm.get_surface_mesh_tables_v2(WING_RIGHT, mesh=None, mode="Structured", is_vortex=False)
-mesh_WL = vlm.get_surface_mesh_tables_v2(WING_LEFT, mesh=None, mode="Structured", is_vortex=False)
 
-exp.export_mesh("mesh_maybe.dat", mesh_WR)
-W_ax = vlm.print_mesh_as_polygons(None, mesh_WR, color_1=[0.8, 0.8, 1.0], color_2=[0.2, 0.2, 0.25], alpha=1.0, line=0.1)
-W_ax = vlm.print_mesh_as_polygons(W_ax, mesh_WL, color_1=[0.8, 0.8, 1.0], color_2=[0.2, 0.2, 0.25], alpha=1.0, line=0.1)
-plt.gca().set_aspect('equal', adjustable='box')
+# exp.export_mesh("mesh_maybe.dat", mesh_W)
+# W_ax = vlm.print_mesh_as_polygons(None, mesh_W, color_1=[0.8, 0.8, 1.0], color_2=[0.2, 0.2, 0.25], alpha=1.0, line=0.1)
+# plt.gca().set_aspect('equal', adjustable='box')
 
-mesh_BR = vlm.get_surface_mesh_tables_v2(BALL, mesh=None, mode="Structured", is_vortex=False)
-B_ax = vlm.print_mesh_as_polygons(None, mesh_BR, color_1=[0.8, 0.8, 1.0], color_2=[0.2, 0.2, 0.25], alpha=1.0, line=0.1)
-print(mesh_BR.get_unused_vertices())
+# mesh_BR = vlm.get_surface_mesh_tables_v2(BALL, mesh=None, mode="Structured", is_vortex=True)
+# B_ax = vlm.print_mesh_as_polygons(None, mesh_BR, color_1=[0.8, 0.8, 1.0], color_2=[0.2, 0.2, 0.25], alpha=1.0, line=0.1)
+# print(len(mesh_BR.get_unused_vertices()))
+
+
+# RECT_RIGHT = Body(body_type="General")
+# RECT_RIGHT.add_general_surface_cst(nx=15, ny=251, b=32/math.pi, d=-16/math.pi, c=[1],
+#                                    z_te_u=[0.0], z_te_l=[0.0],
+#                                    coefficients_u=[1],
+#                                    coefficients_l=[1],
+#                                    x_le=[0.0], z_n=[0.0], delta_alpha_t=[0.0],
+#                                    n1=[0.5], n2=[0.5], nc1=0.5, nc2=0.5, ny1=0.5, ny2=0.5)
+#
+# mesh_RECT = vlm.get_surface_mesh_tables_v2(RECT_RIGHT, mesh=None, mode="Structured", is_vortex=True)
+# # mesh_RECT = vlm.get_surface_mesh_tables_v2(RECT_LEFT, mesh=mesh_RECT, mode="Structured", is_vortex=True)
+# exp.export_mesh("ellipse_wing.dat", mesh_RECT)
+#
+# RECT_ax = vlm.print_mesh_as_polygons(None, mesh_RECT, color_1=[0.8, 0.8, 1.0], color_2=[0.2, 0.2, 0.25], alpha=1.0, line=0.1)
+# plt.gca().set_aspect('equal', adjustable='box')
+
+
+
 
 # # Generate VLM mesh
 # vertex_table_1, elem_table_1, col_table_1, row_table_1, lift_table_1, _ = vlm.get_vortex_mesh(X1, Y1, Su1, Sl1, 1, True)
