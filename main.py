@@ -87,7 +87,7 @@ print(mesh_W.get_unused_vertices())
 
 mesh_W.delete_unused_vertices()
 print(mesh_W.get_unused_vertices())
-exp.export_mesh("pazzy_wing_vlm.dat", mesh_W)
+exp.export_mesh("smith_wing_vlm.dat", mesh_W)
 W_ax = vlm.print_mesh_as_polygons(None, mesh_W, color_1=[0.8, 0.8, 1.0], color_2=[0.2, 0.2, 0.25], alpha=1.0, line=0.1)
 
 # W_ax = vlm.print_mesh_as_polygons(None, mesh_W, color_1=[0.8, 0.8, 1.0], color_2=[0.2, 0.2, 0.25], alpha=1.0, line=0.1)
